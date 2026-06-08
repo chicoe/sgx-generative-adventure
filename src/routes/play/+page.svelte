@@ -149,7 +149,16 @@
 				body: JSON.stringify({
 					behaviourId: dialogue.behaviourId,
 					playerMessage: text,
-					history: priorHistory
+					history: priorHistory,
+					sceneContext: {
+						name: scene.name,
+						prompt: scene.prompt,
+						exits: availableExits(scene, game).map((x) => ({
+							label: x.label,
+							toSceneId: x.toSceneId
+						})),
+						inventory: game.inventory
+					}
 				})
 			});
 			if (!resp.ok) throw new Error(`HTTP ${resp.status}`);

@@ -13,7 +13,8 @@ service cloud.firestore {
       // are not email_verified, so we don't require it here.
       return request.auth != null
         && request.auth.token.email in [
-          'francisco@incomputable.io'
+          'francisco@incomputable.io',
+          'test@incomputable.io'
         ];
     }
 

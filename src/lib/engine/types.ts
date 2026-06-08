@@ -72,6 +72,7 @@ export interface Scene {
 	exits: Exit[]; // navigable transitions (subset shown in graph)
 	onEnter?: Effect[];
 	introText?: string; // optional narration shown on enter
+	prompt?: string; // scene description + instructions given to the LLM as context
 }
 
 // ---------------------------------------------------------------------------

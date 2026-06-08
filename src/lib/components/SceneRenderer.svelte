@@ -8,9 +8,10 @@
 	let {
 		scene,
 		look = { x: 0, y: 0 },
-		// How a layer imagePath resolves to a URL. Default: static asset under /.
-		// M3 will pass a resolver that returns Firebase Storage download URLs.
-		resolve = (path: string) => `/${path}`
+		// How a layer imagePath resolves to a URL. Absolute URLs (Storage download
+		// URLs) and rooted paths pass through; bare paths resolve under /static.
+		resolve = (path: string) =>
+			/^(https?:)?\/\//.test(path) || path.startsWith('/') ? path : `/${path}`
 	}: {
 		scene: Scene;
 		look?: { x: number; y: number };

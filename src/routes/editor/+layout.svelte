@@ -34,6 +34,10 @@
 		{#if authStore.user}
 			<nav>
 				<a href={resolve('/editor')}>Dashboard</a>
+				<a href={resolve('/editor/graph')}>Graph</a>
+				<a href={resolve('/editor/scenes')}>Scenes</a>
+				<a href={resolve('/editor/items')}>Items</a>
+				<a href={resolve('/editor/behaviours')}>Behaviours</a>
 				<a href={resolve('/play')}>▶ Play</a>
 			</nav>
 			<span class="spacer"></span>

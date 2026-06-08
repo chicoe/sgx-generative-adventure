@@ -38,6 +38,8 @@ export const placeholderBuild: Build = {
 			id: 'scene-a',
 			name: 'Scene A (placeholder)',
 			introText: '[ placeholder intro text for Scene A — replace via editor ]',
+			prompt:
+				'[ placeholder scene prompt for Scene A — describe the location and tell the computer how to behave here; the LLM also sees the exits and the player inventory ]',
 			// Demonstrates the FilterSpec capability; not a final art grade.
 			filter: { css: 'contrast(1.03) brightness(1.01)' },
 			layers: [
@@ -63,6 +65,7 @@ export const placeholderBuild: Build = {
 			id: 'scene-b',
 			name: 'Scene B (placeholder)',
 			introText: '[ placeholder intro text for Scene B — replace via editor ]',
+			prompt: '[ placeholder scene prompt for Scene B — replace via editor ]',
 			filter: { css: 'contrast(1.03) brightness(1.01)' },
 			layers: [
 				{ id: 'back', imagePath: 'placeholder/back-b.svg', z: 0, parallaxFactor: 0.08 },

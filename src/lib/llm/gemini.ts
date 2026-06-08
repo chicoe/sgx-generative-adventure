@@ -9,7 +9,7 @@
 import { GoogleGenAI, Type, type Schema } from '@google/genai';
 import { env } from '$env/dynamic/private';
 import type { ConversationTurn, LLMBehaviour } from '../engine/types';
-import { buildPrompt } from './prompt';
+import { buildPrompt, type SceneContext } from './prompt';
 import { llmResponseSchema, type LlmResponse } from './outcome';
 
 const TIMEOUT_MS = 6000;
@@ -65,14 +65,15 @@ function responseSchema(outcomeIds: string[]): Schema {
 export async function generateLlmResponse(
 	behaviour: LLMBehaviour,
 	history: ConversationTurn[],
-	playerMessage: string
+	playerMessage: string,
+	scene?: SceneContext
 ): Promise<LlmResponse> {
 	const backend = selectBackend();
 	if (!backend) throw new Error('Gemini is not configured');
 
 	const ai = makeClient(backend);
 	const model = env.GEMINI_MODEL || DEFAULT_MODEL;
-	const { systemInstruction, userPrompt } = buildPrompt(behaviour, history, playerMessage);
+	const { systemInstruction, userPrompt } = buildPrompt(behaviour, history, playerMessage, scene);
 	const outcomeIds = behaviour.allowedOutcomes.map((o) => o.id);
 
 	const res = await ai.models.generateContent({

@@ -17,6 +17,10 @@ import type { DraftContent } from './build';
 
 const rootDoc = () => doc(db(), 'draft', 'content');
 
+// Firestore rejects `undefined`; a JSON round-trip drops undefined keys so
+// optional fields (filter, condition, effects, …) left unset don't error.
+const clean = <T>(o: T): T => JSON.parse(JSON.stringify(o));
+
 export async function loadDraft(): Promise<DraftContent | null> {
 	const [meta, scenes, items, behaviours] = await Promise.all([
 		getDoc(rootDoc()),
@@ -37,12 +41,14 @@ export async function setStartScene(sceneId: string) {
 	await setDoc(rootDoc(), { startSceneId: sceneId }, { merge: true });
 }
 
-export const saveScene = (s: Scene) => setDoc(doc(db(), 'draft', 'content', 'scenes', s.id), s);
+export const saveScene = (s: Scene) =>
+	setDoc(doc(db(), 'draft', 'content', 'scenes', s.id), clean(s));
 export const deleteScene = (id: string) => deleteDoc(doc(db(), 'draft', 'content', 'scenes', id));
-export const saveItem = (it: Item) => setDoc(doc(db(), 'draft', 'content', 'items', it.id), it);
+export const saveItem = (it: Item) =>
+	setDoc(doc(db(), 'draft', 'content', 'items', it.id), clean(it));
 export const deleteItem = (id: string) => deleteDoc(doc(db(), 'draft', 'content', 'items', id));
 export const saveBehaviour = (b: LLMBehaviour) =>
-	setDoc(doc(db(), 'draft', 'content', 'behaviours', b.id), b);
+	setDoc(doc(db(), 'draft', 'content', 'behaviours', b.id), clean(b));
 export const deleteBehaviour = (id: string) =>
 	deleteDoc(doc(db(), 'draft', 'content', 'behaviours', id));
 
@@ -50,8 +56,9 @@ export const deleteBehaviour = (id: string) =>
 export async function seedDraftFromBuild(build: Build): Promise<void> {
 	const batch = writeBatch(db());
 	batch.set(rootDoc(), { startSceneId: build.meta.startSceneId });
-	for (const s of build.scenes) batch.set(doc(db(), 'draft', 'content', 'scenes', s.id), s);
-	for (const it of build.items) batch.set(doc(db(), 'draft', 'content', 'items', it.id), it);
-	for (const b of build.behaviours) batch.set(doc(db(), 'draft', 'content', 'behaviours', b.id), b);
+	for (const s of build.scenes) batch.set(doc(db(), 'draft', 'content', 'scenes', s.id), clean(s));
+	for (const it of build.items) batch.set(doc(db(), 'draft', 'content', 'items', it.id), clean(it));
+	for (const b of build.behaviours)
+		batch.set(doc(db(), 'draft', 'content', 'behaviours', b.id), clean(b));
 	await batch.commit();
 }

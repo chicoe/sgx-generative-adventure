@@ -27,12 +27,13 @@ Two apps share one content model in a single SvelteKit project:
   referential-integrity validation, client-SDK `loader` with placeholder fallback, Admin-SDK
   atomic `publish`/`rollback`). `/play` loads the active build, falling back to the placeholder
   when nothing is published. _Remaining acceptance: live publish round-trip (needs ADC / deploy)._
-- **M4 — editor** (in progress) — client-only `/editor` (`ssr=false`) gated by Firebase
-  Email/Password auth + the allowlist. Dashboard does seed-from-placeholder → **client-side atomic
-  publish** → rollback (`src/lib/content/{draft,publishClient}.ts`). _TODO: scene/item/behaviour
-  editors, Svelte Flow graph, image upload, behaviour test panel._ Sign in at `/editor` as an
-  allowlisted user to exercise.
-- M5 polish — not started.
+- **M4 — editor** ✓ client-only `/editor` (`ssr=false`) gated by Firebase Email/Password auth +
+  the allowlist: **scene graph** (Svelte Flow), **scenes editor** (layers + image upload, filter,
+  hotspots/exits with conditions & effects, set-start-scene), **items editor**, **behaviour editor**
+  with a live **test panel**, and a dashboard for **atomic publish/rollback**. Sign in at `/editor`
+  as an allowlisted user to author and publish a mini-game end to end.
+- **M5 — polish** (next) — transitions/audio, keyboard UX, retro grade, Pi perf, network handling,
+  save/resume across power-cycle.
 
 ## Develop
 

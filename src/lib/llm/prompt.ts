@@ -1,6 +1,7 @@
-// Prompt construction (SPEC §5.2). Pure — composes a behaviour + transcript +
-// the new player message into a system instruction and a user prompt. The model
-// is told to reply in voice and pick exactly one outcomeId; it never emits effects.
+// Prompt construction (SPEC §5.2). Pure — composes a behaviour + scene context +
+// transcript + the new player message into a system instruction and a user
+// prompt. The model replies in voice and picks exactly one outcomeId; it never
+// emits effects.
 import type { ConversationTurn, LLMBehaviour } from '../engine/types';
 
 export interface PromptParts {
@@ -8,10 +9,35 @@ export interface PromptParts {
 	userPrompt: string;
 }
 
+// What the LLM is told about the player's current situation, so it can converse
+// in context and pick the right outcome (e.g. one whose effects take an exit).
+export interface SceneContext {
+	name?: string;
+	prompt?: string; // author's scene description + instructions for the computer
+	exits?: { label: string; toSceneId: string }[];
+	inventory?: string[];
+}
+
+function sceneSection(scene: SceneContext): string {
+	const exits = scene.exits?.length
+		? scene.exits.map((e) => `- ${e.label} (leads to scene "${e.toSceneId}")`).join('\n')
+		: '- (none)';
+	return [
+		`CURRENT SCENE: ${scene.name ?? '(unnamed)'}`,
+		scene.prompt ? `SCENE NOTES: ${scene.prompt}` : '',
+		'AVAILABLE EXITS:',
+		exits,
+		`PLAYER INVENTORY: ${scene.inventory?.length ? scene.inventory.join(', ') : '(empty)'}`
+	]
+		.filter(Boolean)
+		.join('\n');
+}
+
 export function buildPrompt(
 	behaviour: LLMBehaviour,
 	history: ConversationTurn[],
-	playerMessage: string
+	playerMessage: string,
+	scene?: SceneContext
 ): PromptParts {
 	const outcomes = behaviour.allowedOutcomes
 		.map(
@@ -23,9 +49,9 @@ export function buildPrompt(
 		? behaviour.guardrails.map((g) => `- ${g}`).join('\n')
 		: '- (none specified)';
 
-	const systemInstruction = [
-		behaviour.systemPrompt,
-		'',
+	const parts = [behaviour.systemPrompt, ''];
+	if (scene) parts.push(sceneSection(scene), '');
+	parts.push(
 		`GOAL THE PLAYER IS PURSUING: ${behaviour.goal}`,
 		'',
 		'HARD RULES YOU MUST NEVER VIOLATE:',
@@ -34,17 +60,17 @@ export function buildPrompt(
 		'Respond in character, then choose exactly ONE outcomeId from this list:',
 		outcomes,
 		'',
-		'Return only the structured fields: a short in-character `reply`, the chosen `outcomeId`,',
-		'and optional `reasoning`. Never invent outcomes or game effects — only select an outcomeId.'
-	].join('\n');
+		'Use the scene context to converse naturally. You may only change the game by selecting one',
+		'of the allowed outcomes — never invent outcomes or effects. Return only the structured fields:',
+		'a short in-character `reply`, the chosen `outcomeId`, and optional `reasoning`.'
+	);
 
 	const transcript = history.length
 		? history.map((t) => `${t.role === 'player' ? 'PLAYER' : 'COMPUTER'}: ${t.text}`).join('\n')
 		: '(no prior turns)';
-
 	const userPrompt = ['CONVERSATION SO FAR:', transcript, '', `PLAYER: ${playerMessage}`].join(
 		'\n'
 	);
 
-	return { systemInstruction, userPrompt };
+	return { systemInstruction: parts.join('\n'), userPrompt };
 }

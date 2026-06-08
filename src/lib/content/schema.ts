@@ -65,7 +65,8 @@ export const sceneSchema = z.object({
 	hotspots: z.array(hotspotSchema),
 	exits: z.array(exitSchema),
 	onEnter: z.array(effectSchema).optional(),
-	introText: z.string().optional()
+	introText: z.string().optional(),
+	prompt: z.string().optional()
 });
 
 export const itemSchema = z.object({
