@@ -39,4 +39,13 @@ describe('buildPrompt', () => {
 	it('notes when there are no prior turns', () => {
 		expect(buildPrompt(behaviour, [], 'x').userPrompt).toContain('(no prior turns)');
 	});
+
+	it('lists giveable items as present things the computer may hand over', () => {
+		const { systemInstruction } = buildPrompt(behaviour, [], 'hi', {
+			name: 'Cryo Pod',
+			giveable: [{ itemId: 'keycard', label: 'Keycard' }]
+		});
+		expect(systemInstruction).toContain('ITEMS PRESENT HERE');
+		expect(systemInstruction).toContain('keycard');
+	});
 });

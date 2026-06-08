@@ -90,7 +90,7 @@ export function withSyntheticOutcomes(
 		ids.add(id);
 		extra.push({
 			id,
-			label: `Give the player "${g.label}" (item ${g.itemId}) — only if they earn or convince you`,
+			label: `Give the player "${g.label}" (item ${g.itemId}) — when they ask for it`,
 			granted: true,
 			effects: [{ type: 'addItem', itemId: g.itemId }]
 		});

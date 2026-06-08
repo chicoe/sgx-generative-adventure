@@ -84,6 +84,15 @@ export const POST: RequestHandler = async ({ request }) => {
 	);
 	const history = body.history as ConversationTurn[];
 
+	// Debug aid while authoring content: the scene, the giveable items the client
+	// offered, and every outcomeId the model may pick (incl. synthesized exit:* /
+	// grant:*). Watch your dev-server console. Remove once content is dialled in.
+	console.log(
+		`[converse] scene="${body.sceneContext?.name ?? '—'}" ` +
+			`giveable=[${(body.sceneContext?.giveable ?? []).map((g) => g.itemId).join(', ')}] ` +
+			`outcomes=[${behaviour.allowedOutcomes.map((o) => o.id).join(', ')}]`
+	);
+
 	let reply = FALLBACK_REPLY;
 	let outcomeId = fallbackOutcome(behaviour).id;
 

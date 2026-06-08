@@ -31,7 +31,7 @@ function sceneSection(scene: SceneContext): string {
 		scene.prompt ? `SCENE NOTES: ${scene.prompt}` : '',
 		'AVAILABLE EXITS:',
 		exits,
-		'ITEMS YOU MAY GIVE (only here, only if the player earns or convinces you):',
+		'ITEMS PRESENT HERE THAT YOU CAN GIVE THE PLAYER:',
 		giveable,
 		`PLAYER INVENTORY: ${scene.inventory?.length ? scene.inventory.join(', ') : '(empty)'}`
 	]
@@ -74,9 +74,10 @@ export function buildPrompt(
 		'- If SCENE NOTES say an exit or action requires an item (e.g. a key, a lever, a password), only',
 		'  allow it when that item is listed in PLAYER INVENTORY; otherwise stay in character and explain',
 		'  what is needed. Do not pretend the player has something they do not.',
-		'- You may hand the player an item ONLY if it appears under ITEMS YOU MAY GIVE and they have',
-		'  genuinely earned it or made a convincing case. Choose the matching grant outcome to actually',
-		'  give it; never claim to give anything that is not on that list.',
+		'- The items under ITEMS PRESENT HERE are genuinely in this location and you ARE allowed to give',
+		'  them. Acknowledge them honestly when the player asks. When the player asks for one (a brief',
+		'  reason helps but is not required), hand it over by choosing its grant outcome. Never invent,',
+		'  offer, or promise an item that is not listed there.',
 		'- Most turns are ordinary conversation: when no listed action or exit clearly applies, pick the',
 		'  "no change" outcome and simply reply. Only pick an action or exit outcome when the player',
 		'  clearly intends it.',
