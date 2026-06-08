@@ -1,0 +1,27 @@
+/* Neutral dev-scaffold palette. This is utilitarian chrome, NOT the game's
+   visual direction — the client provides real art/theme later. Keep it plain. */
+:root {
+	--bg: #0f1113;
+	--panel: #16191d;
+	--line: #2c3137;
+	--ink: #c2c8cf;
+	--ink-dim: #6b7178;
+	--accent: #9fb0c0;
+	font-family: ui-monospace, 'SF Mono', 'Cascadia Code', 'Roboto Mono', Menlo, Consolas, monospace;
+}
+
+* {
+	box-sizing: border-box;
+}
+
+html,
+body {
+	margin: 0;
+	height: 100%;
+	background: var(--bg);
+	color: var(--ink);
+}
+
+a {
+	color: var(--accent);
+}

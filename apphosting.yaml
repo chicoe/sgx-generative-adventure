@@ -1,0 +1,31 @@
+# Firebase App Hosting config (Node buildpack — no custom adapter needed).
+# Secrets are stored in Cloud Secret Manager; set them with:
+#   firebase apphosting:secrets:set GEMINI_API_KEY
+# Non-secret values can be edited inline below.
+runConfig:
+  minInstances: 0
+  maxInstances: 2
+
+env:
+  # Public client config — exposed to the browser bundle (PUBLIC_ prefix).
+  - variable: PUBLIC_FIREBASE_CONFIG
+    value: '{}' # replace with your project's web-app config JSON
+    availability:
+      - BUILD
+      - RUNTIME
+
+  - variable: GEMINI_MODEL
+    value: gemini-2.5-flash-lite
+    availability:
+      - RUNTIME
+
+  - variable: EDITOR_ALLOWED_EMAILS
+    value: ''
+    availability:
+      - RUNTIME
+
+  # Server-only secret; never exposed to the client.
+  - variable: GEMINI_API_KEY
+    secret: GEMINI_API_KEY
+    availability:
+      - RUNTIME

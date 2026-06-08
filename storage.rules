@@ -1,0 +1,13 @@
+rules_version = '2';
+
+// Scene/item images. The game must read them freely; only signed-in editor
+// users upload. App-level allowlist enforcement happens in the editor; tighten
+// these write rules (e.g. custom claim) before any public deployment.
+service firebase.storage {
+  match /b/{bucket}/o {
+    match /{allPaths=**} {
+      allow read: if true;
+      allow write: if request.auth != null;
+    }
+  }
+}

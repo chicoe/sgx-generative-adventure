@@ -1,0 +1,50 @@
+rules_version = '2';
+
+// Content model (see SPEC §4.6):
+//   builds/*  + config/current  -> published, world-readable, never client-writable
+//   draft/*                     -> editor working copies, gated by the auth allowlist
+//   saves/*                     -> per-session player state (no player accounts)
+//
+// Publishing and server-side state changes use the Admin SDK, which bypasses
+// these rules entirely. They constrain only direct client access.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isEditor() {
+      // Mirror EDITOR_ALLOWED_EMAILS here. Empty list = no client can write
+      // drafts (safe by default) until the project owner fills it in.
+      return request.auth != null
+        && request.auth.token.email_verified == true
+        && request.auth.token.email in [
+          // 'owner@example.com'
+        ];
+    }
+
+    // Published builds: the game reads these; only the publish flow (Admin SDK) writes them.
+    match /builds/{buildId} {
+      allow read: if true;
+      allow write: if false;
+    }
+    match /config/{document} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    // Editor draft content.
+    match /draft/{document=**} {
+      allow read, write: if isEditor();
+    }
+
+    // Player saves, keyed by an anonymous session id held in localStorage.
+    // Single-player kiosk; no accounts. Tighten with App Check before any
+    // public deployment.
+    match /saves/{sessionId} {
+      allow read, write: if true;
+    }
+
+    // Deny everything else.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
