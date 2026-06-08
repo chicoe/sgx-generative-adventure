@@ -44,6 +44,14 @@
 	let inputText = $state('');
 	let pending = $state(false);
 	let spinner = $state('|');
+	// Gameplay renders at a fixed 1280×720 (16:9 landscape); scaled to fit, never
+	// up past 1:1, centered with black letterboxing.
+	const GAME_W = 1280;
+	const GAME_H = 720;
+	let scale = $state(1);
+	function computeScale() {
+		scale = Math.min(1, window.innerWidth / GAME_W, window.innerHeight / GAME_H);
+	}
 	let atEnding = $state(false);
 	let endingTimer: ReturnType<typeof setTimeout> | undefined;
 	const ENDING_RESTART_MS = 180_000; // 3 minutes at an ending → auto restart
@@ -54,6 +62,10 @@
 	let convo = $state<ConversationTurn[]>([]);
 
 	const scene = $derived(findScene(build.scenes, game.currentSceneId)!);
+
+	// A scene with no usable layer art shows a "no signal" static screen (the
+	// client hasn't supplied art for it yet).
+	const sceneHasArt = (s: Scene) => s.layers.some((l) => l.imagePath?.trim());
 
 	function push(who: Line['who'], text?: string | null) {
 		if (!text) return;
@@ -274,6 +286,7 @@
 	});
 
 	onMount(() => {
+		computeScale();
 		loadActiveBuild().then(({ build: loaded, source }) => {
 			buildSource = source;
 			if (source === 'firestore') {
@@ -303,74 +316,187 @@
 </script>
 
 <svelte:head><title>Adventure Engine — Play</title></svelte:head>
-<svelte:window onkeydown={onKeydown} onkeyup={onKeyup} />
+<svelte:window onkeydown={onKeydown} onkeyup={onKeyup} onresize={computeScale} />
 
-<main>
-	<div class="stage">
-		{#key game.currentSceneId}
-			{@const snap = findScene(build.scenes, game.currentSceneId)!}
-			<div class="scene-holder" in:fade={{ duration: 450 }} out:fade={{ duration: 300 }}>
-				<SceneRenderer scene={snap} {look} />
-			</div>
-		{/key}
-		<span
-			class="led {buildSource}"
-			title={buildSource === 'firestore' ? 'Live build (Firestore)' : 'Placeholder build'}
-		></span>
-		{#if buildSource === 'placeholder'}<span class="ph-tag">placeholder build</span>{/if}
-	</div>
-
-	<section class="terminal">
-		<div class="transcript" bind:this={transcriptEl}>
-			{#each lines as line (line.id)}
-				<p class={line.who}>
-					{#if line.who === 'player'}<span class="who">&gt;</span>{/if}{line.text.slice(
-						0,
-						line.revealed
-					)}
-				</p>
-			{/each}
-			{#if pending}<p class="spinner">{spinner}</p>{/if}
+<main class="letterbox">
+	<div class="frame" style:transform="scale({scale})">
+		<div class="stage">
+			{#key game.currentSceneId}
+				{@const snap = findScene(build.scenes, game.currentSceneId)!}
+				<div class="scene-holder" in:fade={{ duration: 450 }} out:fade={{ duration: 300 }}>
+					{#if sceneHasArt(snap)}
+						<SceneRenderer scene={snap} {look} />
+					{:else}
+						<div class="nosignal" aria-label="no signal">
+							<div class="static"></div>
+							<span class="nosignal-text">NO SIGNAL</span>
+						</div>
+					{/if}
+				</div>
+			{/key}
+			<span
+				class="led {buildSource}"
+				title={buildSource === 'firestore' ? 'Live build (Firestore)' : 'Placeholder build'}
+			></span>
+			{#if buildSource === 'placeholder'}<span class="ph-tag">placeholder build</span>{/if}
 		</div>
 
-		<form
-			class="composer"
-			onsubmit={(e) => {
-				e.preventDefault();
-				sendMessage();
-			}}
-		>
-			<span class="prompt">&gt;</span>
-			<input
-				use:autofocus
-				placeholder={atEnding ? 'type anything to play again…' : 'type to the computer…'}
-				bind:value={inputText}
-				disabled={pending}
-			/>
-		</form>
-	</section>
+		<section class="terminal">
+			<div class="transcript" bind:this={transcriptEl}>
+				{#each lines as line (line.id)}
+					<p class={line.who}>
+						{#if line.who === 'player'}<span class="who">&gt;</span>{/if}{line.text.slice(
+							0,
+							line.revealed
+						)}
+					</p>
+				{/each}
+				{#if pending}<p class="spinner">{spinner}</p>{/if}
+			</div>
+
+			<form
+				class="composer"
+				onsubmit={(e) => {
+					e.preventDefault();
+					sendMessage();
+				}}
+			>
+				<span class="prompt">&gt;</span>
+				<input
+					use:autofocus
+					placeholder={atEnding ? 'type anything to play again…' : 'type to the computer…'}
+					bind:value={inputText}
+					disabled={pending}
+				/>
+			</form>
+		</section>
+
+		<div class="crt" aria-hidden="true"></div>
+	</div>
 </main>
 
 <style>
-	main {
-		display: flex;
-		flex-direction: column;
-		gap: 0.75rem;
-		align-items: center;
-		min-height: 100dvh;
-		padding: 1.25rem;
+	.letterbox {
+		position: fixed;
+		inset: 0;
+		display: grid;
+		place-items: center;
+		overflow: hidden;
+		background: #000;
+	}
+	/* The game renders at a fixed 1280×720 (16:9) and is scaled to fit (never up past 1:1). */
+	.frame {
+		flex: none;
+		width: 1280px;
+		height: 720px;
+		background: var(--bg);
+		position: relative;
+		overflow: hidden;
+		transform-origin: center;
 	}
 
+	/* CRT scanlines + vignette + a faint phosphor flicker over the game frame. */
+	.crt {
+		position: absolute;
+		inset: 0;
+		z-index: 100;
+		pointer-events: none;
+		background:
+			repeating-linear-gradient(
+				to bottom,
+				rgba(0, 0, 0, 0.18) 0,
+				rgba(0, 0, 0, 0.18) 1px,
+				transparent 1px,
+				transparent 3px
+			),
+			radial-gradient(ellipse at center, transparent 58%, rgba(0, 0, 0, 0.55) 100%);
+		animation: crt-flicker 4s infinite;
+	}
+	@keyframes crt-flicker {
+		0%,
+		97%,
+		100% {
+			opacity: 1;
+		}
+		98% {
+			opacity: 0.82;
+		}
+		99% {
+			opacity: 0.94;
+		}
+	}
+	@media (prefers-reduced-motion: reduce) {
+		.crt {
+			animation: none;
+		}
+	}
+
+	/* The scene fills the whole 16:9 frame; the terminal floats over it. */
 	.stage {
-		position: relative;
-		width: min(100%, 1100px);
-		aspect-ratio: 16 / 9;
-		border: 1px solid var(--line);
+		position: absolute;
+		inset: 0;
 		overflow: hidden;
+		box-shadow: 0 0 60px rgba(255, 176, 0, 0.05) inset;
 	}
 	.scene-holder {
 		position: absolute;
 		inset: 0;
+	}
+
+	/* "No signal" fallback for scenes with no art yet: amber-tinged TV snow. */
+	.nosignal {
+		position: absolute;
+		inset: 0;
+		display: grid;
+		place-items: center;
+		background: #050403;
+		overflow: hidden;
+	}
+	.static {
+		position: absolute;
+		inset: -20%;
+		background-image: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='100' height='100'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix type='saturate' values='0'/></filter><rect width='100' height='100' filter='url(%23n)'/></svg>");
+		background-size: 170px 170px;
+		opacity: 0.42;
+		animation: snow 0.5s steps(5) infinite;
+	}
+	@keyframes snow {
+		0% {
+			background-position: 0 0;
+		}
+		20% {
+			background-position: -45px 30px;
+		}
+		40% {
+			background-position: 50px -25px;
+		}
+		60% {
+			background-position: -30px -50px;
+		}
+		80% {
+			background-position: 40px 20px;
+		}
+		100% {
+			background-position: -20px 40px;
+		}
+	}
+	@media (prefers-reduced-motion: reduce) {
+		.static {
+			animation: none;
+		}
+	}
+	.nosignal-text {
+		position: relative;
+		z-index: 2;
+		font-family: var(--font-ui);
+		font-weight: 700;
+		letter-spacing: 0.3em;
+		font-size: 1.6rem;
+		color: var(--ink);
+		text-shadow: 0 0 12px rgba(255, 176, 0, 0.55);
+		padding: 0.5rem 1.1rem;
+		border: 1px solid var(--line);
+		background: rgba(10, 8, 5, 0.6);
 	}
 
 	.led {
@@ -400,18 +526,28 @@
 		color: #d8a23a;
 	}
 
+	/* Translucent overlay docked at the bottom, floating over the scene. */
 	.terminal {
-		width: min(100%, 1100px);
+		position: absolute;
+		left: 1.2rem;
+		right: 1.2rem;
+		bottom: 1.2rem;
+		z-index: 80;
+		max-height: 44%;
 		display: flex;
 		flex-direction: column;
-		gap: 0.6rem;
-		padding: 0.9rem 1rem;
-		background: var(--panel);
+		gap: 0.5rem;
+		padding: 0.8rem 1rem;
+		background: rgba(10, 8, 5, 0.74);
 		border: 1px solid var(--line);
 		font-family: var(--font-terminal);
+		text-shadow: var(--glow);
+		box-shadow: 0 0 22px rgba(255, 176, 0, 0.06);
+		backdrop-filter: blur(2px);
 	}
 	.transcript {
-		height: 12rem;
+		flex: 1;
+		min-height: 0;
 		overflow-y: auto;
 		display: flex;
 		flex-direction: column;
@@ -453,6 +589,12 @@
 	}
 	.composer .prompt {
 		color: var(--accent);
+		animation: blink 1.1s steps(1) infinite;
+	}
+	@keyframes blink {
+		50% {
+			opacity: 0.25;
+		}
 	}
 	.composer input {
 		flex: 1;

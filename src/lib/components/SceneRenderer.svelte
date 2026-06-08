@@ -49,7 +49,7 @@
 		position: absolute;
 		inset: 0;
 		overflow: hidden;
-		background: #02080c;
+		background: var(--bg);
 	}
 
 	.layer {
