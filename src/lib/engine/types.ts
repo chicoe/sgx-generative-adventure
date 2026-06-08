@@ -131,6 +131,7 @@ export interface BuildMeta {
 	version: number;
 	publishedAt: string; // ISO timestamp
 	startSceneId: string;
+	defaultBehaviourId?: string; // the ship-wide computer the player talks to
 }
 
 export interface Build {

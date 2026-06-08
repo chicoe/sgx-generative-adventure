@@ -5,7 +5,12 @@
 import type { Build } from '$lib/engine/types';
 
 export const placeholderBuild: Build = {
-	meta: { version: 0, publishedAt: '2000-01-01T00:00:00.000Z', startSceneId: 'scene-a' },
+	meta: {
+		version: 0,
+		publishedAt: '2000-01-01T00:00:00.000Z',
+		startSceneId: 'scene-a',
+		defaultBehaviourId: 'placeholder-behaviour'
+	},
 	items: [
 		{
 			id: 'placeholder-item',
@@ -72,7 +77,13 @@ export const placeholderBuild: Build = {
 				{ id: 'mid', imagePath: 'placeholder/mid.svg', z: 1, parallaxFactor: 0.4 },
 				{ id: 'fore', imagePath: 'placeholder/fore.svg', z: 2, parallaxFactor: 0.85 }
 			],
-			hotspots: [],
+			hotspots: [
+				{
+					id: 'hotspot-dialogue',
+					label: 'Placeholder computer',
+					behaviourId: 'placeholder-behaviour'
+				}
+			],
 			exits: [{ id: 'to-a', toSceneId: 'scene-a', label: 'Back to Scene A (placeholder exit)' }]
 		}
 	]

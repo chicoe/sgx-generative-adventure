@@ -66,14 +66,21 @@ export async function generateLlmResponse(
 	behaviour: LLMBehaviour,
 	history: ConversationTurn[],
 	playerMessage: string,
-	scene?: SceneContext
+	scene?: SceneContext,
+	opening = false
 ): Promise<LlmResponse> {
 	const backend = selectBackend();
 	if (!backend) throw new Error('Gemini is not configured');
 
 	const ai = makeClient(backend);
 	const model = env.GEMINI_MODEL || DEFAULT_MODEL;
-	const { systemInstruction, userPrompt } = buildPrompt(behaviour, history, playerMessage, scene);
+	const { systemInstruction, userPrompt } = buildPrompt(
+		behaviour,
+		history,
+		playerMessage,
+		scene,
+		opening
+	);
 	const outcomeIds = behaviour.allowedOutcomes.map((o) => o.id);
 
 	const res = await ai.models.generateContent({

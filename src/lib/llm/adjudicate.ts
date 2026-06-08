@@ -28,3 +28,36 @@ export function resolveEffects(behaviour: LLMBehaviour, outcome: Outcome): Effec
 		: (behaviour.onDeniedEffects ?? []);
 	return [...outcome.effects, ...behaviourEffects];
 }
+
+const EXIT_OUTCOME_PREFIX = 'exit:';
+
+/** True for a synthesized "take the player through an exit" outcome. */
+export function isExitOutcomeId(id: string): boolean {
+	return id.startsWith(EXIT_OUTCOME_PREFIX);
+}
+
+/**
+ * Augment a behaviour with one granted outcome per available exit, so the LLM
+ * can move the player by selecting it. The targets come from the scene's real
+ * exits (never the model), keeping transitions deterministic.
+ */
+export function withExitOutcomes(
+	behaviour: LLMBehaviour,
+	exits: { label: string; toSceneId: string }[] = []
+): LLMBehaviour {
+	if (!exits.length) return behaviour;
+	const ids = new Set(behaviour.allowedOutcomes.map((o) => o.id));
+	const extra: Outcome[] = [];
+	for (const e of exits) {
+		const id = `${EXIT_OUTCOME_PREFIX}${e.toSceneId}`;
+		if (ids.has(id)) continue;
+		ids.add(id);
+		extra.push({
+			id,
+			label: `Take the player to "${e.label}" (scene ${e.toSceneId})`,
+			granted: true,
+			effects: [{ type: 'goToScene', sceneId: e.toSceneId }]
+		});
+	}
+	return { ...behaviour, allowedOutcomes: [...behaviour.allowedOutcomes, ...extra] };
+}

@@ -37,7 +37,8 @@ export function buildPrompt(
 	behaviour: LLMBehaviour,
 	history: ConversationTurn[],
 	playerMessage: string,
-	scene?: SceneContext
+	scene?: SceneContext,
+	opening = false
 ): PromptParts {
 	const outcomes = behaviour.allowedOutcomes
 		.map(
@@ -68,9 +69,9 @@ export function buildPrompt(
 	const transcript = history.length
 		? history.map((t) => `${t.role === 'player' ? 'PLAYER' : 'COMPUTER'}: ${t.text}`).join('\n')
 		: '(no prior turns)';
-	const userPrompt = ['CONVERSATION SO FAR:', transcript, '', `PLAYER: ${playerMessage}`].join(
-		'\n'
-	);
+	const userPrompt = opening
+		? 'BEGIN: open the interaction. Greet the player and set the scene in character (1–2 sentences), then await their reply. Do not take any exit or action yet.'
+		: ['CONVERSATION SO FAR:', transcript, '', `PLAYER: ${playerMessage}`].join('\n');
 
 	return { systemInstruction: parts.join('\n'), userPrompt };
 }

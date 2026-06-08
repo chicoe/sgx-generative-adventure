@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { resolve } from '$app/paths';
-	import { loadDraft, seedDraftFromBuild } from '$lib/content/draft';
+	import { loadDraft, seedDraftFromBuild, setDefaultBehaviour } from '$lib/content/draft';
 	import {
 		publishDraftClient,
 		listBuilds,
@@ -66,12 +66,13 @@
 	}
 
 	const rollback = (id: string) => run(() => rollbackTo(id), `Rolled the live game back to ${id}.`);
+	const setComputer = (id: string) => run(() => setDefaultBehaviour(id), 'Ship computer set.');
 </script>
 
 <h1>Dashboard</h1>
 <p class="note">
-	⚠ Editor in progress (M4). Scene / item / behaviour editors and the scene-graph canvas are coming;
-	this page exercises the draft → publish → rollback pipeline. All content is still placeholder.
+	⚠ Placeholder content. Build your game in <strong>Graph</strong> / <strong>Scenes</strong> /
+	<strong>Items</strong> / <strong>Behaviours</strong>, set the ship computer below, then publish.
 </p>
 
 {#if message}<p class="ok">{message}</p>{/if}
@@ -91,6 +92,17 @@
 			Start scene: <code>{draft.meta.startSceneId || '—'}</code> · {draft.scenes.length} scenes ·
 			{draft.items.length} items · {draft.behaviours.length} behaviours
 		</p>
+		<label class="computer">
+			Ship computer <span class="muted">(the behaviour the player talks to everywhere)</span>
+			<select
+				value={draft.meta.defaultBehaviourId ?? ''}
+				onchange={(e) => setComputer(e.currentTarget.value)}
+				disabled={busy || !draft.behaviours.length}
+			>
+				<option value="" disabled>— pick a behaviour —</option>
+				{#each draft.behaviours as b (b.id)}<option value={b.id}>{b.name || b.id}</option>{/each}
+			</select>
+		</label>
 	{:else}
 		<p class="muted">No draft yet.</p>
 	{/if}
@@ -150,6 +162,21 @@
 	}
 	.muted {
 		color: var(--ink-dim);
+	}
+	.computer {
+		display: flex;
+		flex-direction: column;
+		gap: 0.3rem;
+		max-width: 28rem;
+		margin-top: 0.6rem;
+		font-size: 0.85rem;
+	}
+	.computer select {
+		font: inherit;
+		color: var(--ink);
+		background: #0c0e11;
+		border: 1px solid var(--line);
+		padding: 0.4rem 0.5rem;
 	}
 	.errors {
 		border: 1px solid #6b3a3a;

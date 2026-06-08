@@ -13,12 +13,20 @@ import { loadActiveBuild } from '$lib/content/loader';
 import { llmBehaviourSchema } from '$lib/content/schema';
 import type { ConversationTurn, LLMBehaviour } from '$lib/engine/types';
 import { generateLlmResponse, isConfigured } from '$lib/llm/gemini';
-import { findOutcome, fallbackOutcome, resolveEffects } from '$lib/llm/adjudicate';
+import {
+	findOutcome,
+	fallbackOutcome,
+	resolveEffects,
+	withExitOutcomes,
+	isExitOutcomeId
+} from '$lib/llm/adjudicate';
 
 const requestSchema = z.object({
 	behaviourId: z.string().min(1).optional(),
 	behaviour: z.unknown().optional(), // validated with llmBehaviourSchema below
-	playerMessage: z.string().min(1).max(2000),
+	// Omitted when `opening` is true (the computer speaks first).
+	playerMessage: z.string().min(1).max(2000).optional(),
+	opening: z.boolean().optional(),
 	history: z
 		.array(
 			z.object({
@@ -63,7 +71,11 @@ export const POST: RequestHandler = async ({ request }) => {
 	if (!parsed.success) error(400, 'Invalid request body');
 	const body = parsed.data;
 
-	const behaviour = await resolveBehaviour(body);
+	if (!body.opening && !body.playerMessage) error(400, 'playerMessage required');
+
+	// Augment the behaviour with one outcome per available exit so the model can
+	// navigate by selecting one (targets come from the scene, not the model).
+	const behaviour = withExitOutcomes(await resolveBehaviour(body), body.sceneContext?.exits);
 	const history = body.history as ConversationTurn[];
 
 	let reply = FALLBACK_REPLY;
@@ -74,18 +86,12 @@ export const POST: RequestHandler = async ({ request }) => {
 			const res = await generateLlmResponse(
 				behaviour,
 				history,
-				body.playerMessage,
-				body.sceneContext
+				body.playerMessage ?? '',
+				body.sceneContext,
+				body.opening
 			);
-			const matched = findOutcome(behaviour, res.outcomeId);
-			if (matched) {
-				reply = res.reply;
-				outcomeId = matched.id;
-			} else {
-				// Model picked an id outside the allowed set -> fallback (keep its prose).
-				reply = res.reply || FALLBACK_REPLY;
-				outcomeId = fallbackOutcome(behaviour).id;
-			}
+			reply = res.reply || FALLBACK_REPLY;
+			outcomeId = findOutcome(behaviour, res.outcomeId)?.id ?? fallbackOutcome(behaviour).id;
 		} catch (err) {
 			// timeout / transport error / schema-invalid -> fallback (SPEC §5.4: log it)
 			console.error('[converse] Gemini call failed:', err instanceof Error ? err.message : err);
@@ -95,10 +101,17 @@ export const POST: RequestHandler = async ({ request }) => {
 	}
 
 	const outcome = findOutcome(behaviour, outcomeId) ?? fallbackOutcome(behaviour);
-	const appliedEffects = resolveEffects(behaviour, outcome);
-	const playerTurns = history.filter((t) => t.role === 'player').length + 1;
-	const conversationOver =
-		outcome.granted || (behaviour.maxTurns ? playerTurns >= behaviour.maxTurns : false);
+	// On opening the computer only greets — never apply effects. Exit outcomes
+	// apply just their goToScene (no behaviour-level granted/denied effects).
+	const appliedEffects = body.opening
+		? []
+		: isExitOutcomeId(outcome.id)
+			? outcome.effects
+			: resolveEffects(behaviour, outcome);
+	const playerTurns = history.filter((t) => t.role === 'player').length + (body.opening ? 0 : 1);
+	const conversationOver = body.opening
+		? false
+		: outcome.granted || (behaviour.maxTurns ? playerTurns >= behaviour.maxTurns : false);
 
 	return json({
 		reply,

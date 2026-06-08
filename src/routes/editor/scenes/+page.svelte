@@ -2,14 +2,12 @@
 	import { onMount } from 'svelte';
 	import { page } from '$app/state';
 	import EffectsEditor from '$lib/components/editor/EffectsEditor.svelte';
-	import ConditionsEditor from '$lib/components/editor/ConditionsEditor.svelte';
 	import { loadDraft, saveScene, deleteScene, setStartScene } from '$lib/content/draft';
 	import { uploadImage } from '$lib/firebase/storage';
 	import type { Scene } from '$lib/engine/types';
 
 	let scenes = $state<Scene[]>([]);
 	let itemIds = $state<string[]>([]);
-	let behaviourIds = $state<string[]>([]);
 	let startSceneId = $state('');
 	let current = $state<Scene | null>(null);
 	let busy = $state(false);
@@ -24,7 +22,6 @@
 		const d = await loadDraft();
 		scenes = d?.scenes ?? [];
 		itemIds = (d?.items ?? []).map((i) => i.id);
-		behaviourIds = (d?.behaviours ?? []).map((b) => b.id);
 		startSceneId = d?.meta.startSceneId ?? '';
 	}
 	onMount(() =>
@@ -43,7 +40,6 @@
 		const c = $state.snapshot(s) as Scene;
 		c.onEnter ??= [];
 		c.filter ??= {};
-		for (const h of c.hotspots) h.effects ??= [];
 		return c;
 	}
 	const select = (s: Scene) => (current = normalize(s));
@@ -114,26 +110,6 @@
 			uploading = false;
 		}
 	}
-
-	// hotspots / exits
-	const addHotspot = () =>
-		current &&
-		(current.hotspots = [
-			...current.hotspots,
-			{ id: `hotspot-${current.hotspots.length + 1}`, label: '', effects: [] }
-		]);
-	const removeHotspot = (i: number) =>
-		current && (current.hotspots = current.hotspots.filter((_, j) => j !== i));
-	const addExit = () =>
-		current &&
-		(current.exits = [
-			...current.exits,
-			{ id: `exit-${current.exits.length + 1}`, toSceneId: '', label: '' }
-		]);
-	const removeExit = (i: number) =>
-		current && (current.exits = current.exits.filter((_, j) => j !== i));
-
-	const orNone = (v: string) => (v === '' ? undefined : v);
 </script>
 
 <h1>Scenes</h1>
@@ -230,70 +206,10 @@
 			{#if uploading}<span class="muted"> uploading…</span>{/if}
 		</fieldset>
 
-		<fieldset>
-			<legend>hotspots (keyboard-selectable actions)</legend>
-			{#each current.hotspots as hotspot, i (i)}
-				<div class="block">
-					<div class="rowline">
-						<input class="sm" placeholder="id" bind:value={current.hotspots[i].id} />
-						<input placeholder="label" bind:value={current.hotspots[i].label} />
-						<button type="button" class="x" onclick={() => removeHotspot(i)}>✕</button>
-					</div>
-					<div class="grid2">
-						<label
-							>go to scene
-							<select
-								value={hotspot.goToSceneId ?? ''}
-								onchange={(e) => (current!.hotspots[i].goToSceneId = orNone(e.currentTarget.value))}
-							>
-								<option value="">— none —</option>
-								{#each sceneIds as id (id)}<option value={id}>{id}</option>{/each}
-							</select>
-						</label>
-						<label
-							>open behaviour
-							<select
-								value={hotspot.behaviourId ?? ''}
-								onchange={(e) => (current!.hotspots[i].behaviourId = orNone(e.currentTarget.value))}
-							>
-								<option value="">— none —</option>
-								{#each behaviourIds as id (id)}<option value={id}>{id}</option>{/each}
-							</select>
-						</label>
-					</div>
-					<ConditionsEditor bind:condition={current.hotspots[i].condition} {itemIds} />
-					<EffectsEditor
-						bind:effects={current.hotspots[i].effects!}
-						{itemIds}
-						{sceneIds}
-						label="hotspot effects"
-					/>
-				</div>
-			{/each}
-			<button type="button" class="add" onclick={addHotspot}>+ hotspot</button>
-		</fieldset>
-
-		<fieldset>
-			<legend>exits (scene transitions)</legend>
-			{#each current.exits as _exit, i (i)}
-				<div class="block">
-					<div class="rowline">
-						<input class="sm" placeholder="id" bind:value={current.exits[i].id} />
-						<input placeholder="label" bind:value={current.exits[i].label} />
-						<label
-							>to
-							<select bind:value={current.exits[i].toSceneId}>
-								<option value="">— pick —</option>
-								{#each sceneIds as id (id)}<option value={id}>{id}</option>{/each}
-							</select>
-						</label>
-						<button type="button" class="x" onclick={() => removeExit(i)}>✕</button>
-					</div>
-					<ConditionsEditor bind:condition={current.exits[i].condition} {itemIds} />
-				</div>
-			{/each}
-			<button type="button" class="add" onclick={addExit}>+ exit</button>
-		</fieldset>
+		<p class="exits-note">
+			Exits are managed on the <strong>Graph</strong> — connect scenes there ({current.exits.length}
+			exit{current.exits.length === 1 ? '' : 's'} from this scene).
+		</p>
 
 		<EffectsEditor
 			bind:effects={current.onEnter!}
@@ -327,6 +243,12 @@
 	}
 	.msg {
 		color: var(--accent);
+	}
+	.exits-note {
+		font-size: 0.8rem;
+		color: var(--ink-dim);
+		border: 1px solid var(--line);
+		padding: 0.4rem 0.7rem;
 	}
 	.muted {
 		color: var(--ink-dim);
@@ -397,14 +319,6 @@
 	}
 	.sm {
 		max-width: 8rem;
-	}
-	.block {
-		border-left: 2px solid var(--line);
-		padding-left: 0.6rem;
-		display: flex;
-		flex-direction: column;
-		gap: 0.5rem;
-		padding-bottom: 0.4rem;
 	}
 	.layer {
 		display: flex;

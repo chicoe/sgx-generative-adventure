@@ -98,7 +98,8 @@ export const llmBehaviourSchema = z.object({
 export const buildMetaSchema = z.object({
 	version: z.number(),
 	publishedAt: z.string(),
-	startSceneId: z.string().min(1)
+	startSceneId: z.string().min(1),
+	defaultBehaviourId: z.string().optional()
 });
 
 export const buildSchema = z.object({

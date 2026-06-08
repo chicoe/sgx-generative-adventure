@@ -6,7 +6,7 @@ import { itemSchema, llmBehaviourSchema, sceneSchema, buildSchema } from './sche
 
 /** The editable draft content the editor maintains (SPEC §4.6 draft/*). */
 export interface DraftContent {
-	meta: { startSceneId: string };
+	meta: { startSceneId: string; defaultBehaviourId?: string };
 	scenes: Scene[];
 	items: Item[];
 	behaviours: LLMBehaviour[];
@@ -63,6 +63,11 @@ function validateReferences(draft: DraftContent): string[] {
 
 	if (!sceneIds.has(draft.meta.startSceneId)) {
 		errors.push(`startSceneId "${draft.meta.startSceneId}" is not an existing scene`);
+	}
+	if (draft.meta.defaultBehaviourId && !behaviourIds.has(draft.meta.defaultBehaviourId)) {
+		errors.push(
+			`defaultBehaviourId "${draft.meta.defaultBehaviourId}" is not an existing behaviour`
+		);
 	}
 
 	for (const scene of draft.scenes) {
@@ -129,7 +134,12 @@ export function assembleBuild(
 	if (errors.length) return { errors };
 
 	const build: Build = {
-		meta: { version, publishedAt, startSceneId: draft.meta.startSceneId },
+		meta: {
+			version,
+			publishedAt,
+			startSceneId: draft.meta.startSceneId,
+			defaultBehaviourId: draft.meta.defaultBehaviourId
+		},
 		scenes: draft.scenes,
 		items: draft.items,
 		behaviours: draft.behaviours

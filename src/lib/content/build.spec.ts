@@ -68,6 +68,15 @@ describe('assembleBuild', () => {
 		expect(r.build).toBeUndefined();
 		expect(r.errors.length).toBeGreaterThan(0);
 	});
+
+	it('flags a default behaviour that does not exist', () => {
+		const r = assembleBuild(
+			{ ...validDraft, meta: { startSceneId: 'a', defaultBehaviourId: 'ghost' } },
+			1,
+			'now'
+		);
+		expect(r.errors.join(' ')).toContain('ghost');
+	});
 });
 
 describe('serialize/deserialize', () => {

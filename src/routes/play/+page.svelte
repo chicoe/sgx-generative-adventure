@@ -3,25 +3,16 @@
 	import { fade } from 'svelte/transition';
 	import SceneRenderer from '$lib/components/SceneRenderer.svelte';
 	import { placeholderBuild } from '$lib/game/placeholderBuild';
-	import { startGame, takeExit, activateHotspot } from '$lib/engine/state';
-	import { availableExits, availableHotspots, findScene } from '$lib/engine/graph';
+	import { startGame } from '$lib/engine/state';
+	import { availableExits, findScene } from '$lib/engine/graph';
 	import { applyEffects } from '$lib/engine/effects';
 	import { loadActiveBuild } from '$lib/content/loader';
-	import type {
-		Build,
-		ConversationTurn,
-		Effect,
-		Exit,
-		GameState,
-		Hotspot
-	} from '$lib/engine/types';
+	import type { Build, ConversationTurn, Effect, GameState, Scene } from '$lib/engine/types';
 
 	const clamp = (n: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, n));
-
 	function autofocus(node: HTMLInputElement) {
 		node.focus();
 	}
-
 	function describeEffect(e: Effect): string {
 		switch (e.type) {
 			case 'setFlag':
@@ -37,172 +28,147 @@
 		}
 	}
 
-	// --- game state ----------------------------------------------------------
-	// NB: don't name game state `state` — the `$state` rune clashes with a
-	// variable named `state` (reads as a legacy store subscription) in svelte-check.
-	// We start synchronously on the in-repo placeholder build, then swap in the
-	// published Firestore build (if any) on mount.
+	// --- state ---------------------------------------------------------------
 	let build = $state<Build>(placeholderBuild);
 	let buildSource = $state<'firestore' | 'placeholder'>('placeholder');
-	const init = startGame(placeholderBuild);
-	let game = $state(init.state);
-	const startScene = findScene(placeholderBuild.scenes, init.state.currentSceneId);
-	let log = $state<string[]>(
-		[...init.messages, startScene?.introText].filter((l): l is string => Boolean(l)).slice(-6)
-	);
+	let game = $state<GameState>(startGame(placeholderBuild).state);
 
-	function startFrom(b: Build) {
-		const started = startGame(b);
-		game = started.state;
-		const intro = findScene(b.scenes, started.state.currentSceneId)?.introText;
-		log = [...started.messages, intro].filter((l): l is string => Boolean(l)).slice(-6);
-	}
+	type Line = { who: 'narration' | 'player' | 'computer' | 'system'; text: string };
+	let lines = $state<Line[]>([]);
+	let inputText = $state('');
+	let pending = $state(false);
+
+	// The computer the terminal is talking to (the current scene's), plus that
+	// conversation's history for the LLM.
+	let activeBehaviourId = $state<string | undefined>(undefined);
+	let convo = $state<ConversationTurn[]>([]);
 
 	const scene = $derived(findScene(build.scenes, game.currentSceneId)!);
 
-	type Action = { kind: 'hotspot' | 'exit'; id: string; label: string; run: () => void };
-	const actions: Action[] = $derived([
-		...availableHotspots(scene, game).map(
-			(h): Action => ({ kind: 'hotspot', id: h.id, label: h.label, run: () => runHotspot(h) })
-		),
-		...availableExits(scene, game).map(
-			(x): Action => ({ kind: 'exit', id: x.id, label: `→ ${x.label}`, run: () => runExit(x) })
-		)
-	]);
-
-	function pushLog(lines: string[]) {
-		if (lines.length) log = [...log, ...lines].slice(-6);
+	function push(who: Line['who'], text?: string | null) {
+		if (text) lines = [...lines, { who, text }].slice(-200);
 	}
-
-	function applyMove(prevSceneId: string, res: { state: GameState; messages: string[] }) {
-		game = res.state;
-		const lines = [...res.messages];
-		if (game.currentSceneId !== prevSceneId) {
-			const intro = findScene(build.scenes, game.currentSceneId)?.introText;
-			if (intro) lines.push(intro);
-		}
-		pushLog(lines);
+	// One ship-wide computer for the whole game; per-scene flavour comes from the
+	// scene's `prompt`. (Behaviour-on-hotspot was dropped.)
+	function shipComputer(b: Build): string | undefined {
+		return b.meta.defaultBehaviourId ?? b.behaviours[0]?.id;
 	}
-
-	function runExit(exit: Exit) {
-		applyMove(game.currentSceneId, takeExit(game, build, exit));
-	}
-
-	function runHotspot(hotspot: Hotspot) {
-		const prev = game.currentSceneId;
-		const res = activateHotspot(game, build, hotspot);
-		applyMove(prev, res);
-		if (res.openBehaviourId) openDialogue(res.openBehaviourId);
-	}
-
-	// --- dialogue (the LLM exchange, SPEC §5) --------------------------------
-	let dialogue = $state<{
-		open: boolean;
-		behaviourId: string;
-		title: string;
-		turns: ConversationTurn[];
-		input: string;
-		pending: boolean;
-		over: boolean;
-	}>({
-		open: false,
-		behaviourId: '',
-		title: '',
-		turns: [],
-		input: '',
-		pending: false,
-		over: false
-	});
-
-	function openDialogue(behaviourId: string) {
-		const behaviour = build.behaviours.find((b) => b.id === behaviourId);
-		dialogue = {
-			open: true,
-			behaviourId,
-			title: behaviour?.name ?? behaviourId,
-			turns: [],
-			input: '',
-			pending: false,
-			over: false
+	function sceneContextFor(s: Scene, state: GameState) {
+		return {
+			name: s.name,
+			prompt: s.prompt,
+			exits: availableExits(s, state).map((x) => ({ label: x.label, toSceneId: x.toSceneId })),
+			inventory: state.inventory
 		};
 	}
 
-	function closeDialogue() {
-		dialogue = { ...dialogue, open: false };
+	// Set up a scene's transcript + active computer (does NOT call the network,
+	// so it is safe during SSR/init; callers trigger the opening greeting).
+	function enterScene(b: Build, state: GameState, narration: string[]) {
+		const s = findScene(b.scenes, state.currentSceneId);
+		for (const t of narration) push('narration', t);
+		push('narration', s?.introText);
+		convo = [];
+		activeBehaviourId = shipComputer(b);
 	}
 
-	async function sendMessage() {
-		const text = dialogue.input.trim();
-		if (!text || dialogue.pending || dialogue.over) return;
-		const priorHistory = dialogue.turns;
-		const playerTurn: ConversationTurn = {
-			role: 'player',
-			text,
-			behaviourId: dialogue.behaviourId
-		};
-		dialogue = { ...dialogue, turns: [...dialogue.turns, playerTurn], input: '', pending: true };
+	function initFrom(b: Build) {
+		const started = startGame(b);
+		game = started.state;
+		lines = [];
+		enterScene(b, started.state, started.messages);
+	}
 
+	initFrom(placeholderBuild);
+
+	// The computer speaks first when a scene is entered.
+	async function requestOpening() {
+		const behaviour = activeBehaviourId
+			? build.behaviours.find((b) => b.id === activeBehaviourId)
+			: undefined;
+		if (!behaviour) return;
+		pending = true;
 		try {
 			const resp = await fetch('/api/converse', {
 				method: 'POST',
 				headers: { 'content-type': 'application/json' },
 				body: JSON.stringify({
-					behaviourId: dialogue.behaviourId,
-					playerMessage: text,
-					history: priorHistory,
-					sceneContext: {
-						name: scene.name,
-						prompt: scene.prompt,
-						exits: availableExits(scene, game).map((x) => ({
-							label: x.label,
-							toSceneId: x.toSceneId
-						})),
-						inventory: game.inventory
-					}
+					behaviourId: behaviour.id,
+					opening: true,
+					history: [],
+					sceneContext: sceneContextFor(scene, game)
 				})
 			});
-			if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-			const data: {
-				reply: string;
-				granted: boolean;
-				appliedEffects: Effect[];
-				conversationOver: boolean;
-			} = await resp.json();
-			const computerTurn: ConversationTurn = {
-				role: 'computer',
-				text: data.reply,
-				behaviourId: dialogue.behaviourId
-			};
-			game = applyEffects(game, data.appliedEffects);
-			dialogue = {
-				...dialogue,
-				turns: [...dialogue.turns, computerTurn],
-				pending: false,
-				over: data.conversationOver
-			};
-			if (data.appliedEffects.length) {
-				pushLog([`> applied: ${data.appliedEffects.map(describeEffect).join(', ')}`]);
+			const data = await resp.json();
+			if (resp.ok && data.reply) {
+				push('computer', data.reply);
+				convo = [...convo, { role: 'computer', text: data.reply, behaviourId: behaviour.id }];
 			}
 		} catch {
-			const errorTurn: ConversationTurn = {
-				role: 'computer',
-				text: '[ placeholder: could not reach the server — try again ]',
-				behaviourId: dialogue.behaviourId
-			};
-			dialogue = { ...dialogue, turns: [...dialogue.turns, errorTurn], pending: false };
+			/* opening greeting is best-effort */
+		} finally {
+			pending = false;
 		}
 	}
 
-	// --- parallax look -------------------------------------------------------
+	async function sendMessage() {
+		const text = inputText.trim();
+		if (!text || pending) return;
+		push('player', text);
+		inputText = '';
+
+		const behaviour = activeBehaviourId
+			? build.behaviours.find((b) => b.id === activeBehaviourId)
+			: undefined;
+		if (!behaviour) {
+			push('system', '[ nothing here responds ]');
+			return;
+		}
+
+		const prior = convo;
+		convo = [...convo, { role: 'player', text, behaviourId: behaviour.id }];
+		pending = true;
+		try {
+			const resp = await fetch('/api/converse', {
+				method: 'POST',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify({
+					behaviourId: behaviour.id,
+					playerMessage: text,
+					history: prior,
+					sceneContext: sceneContextFor(scene, game)
+				})
+			});
+			if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+			const data: { reply: string; appliedEffects: Effect[] } = await resp.json();
+
+			push('computer', data.reply);
+			convo = [...convo, { role: 'computer', text: data.reply, behaviourId: behaviour.id }];
+
+			if (data.appliedEffects.length) {
+				const prev = game.currentSceneId;
+				game = applyEffects(game, data.appliedEffects);
+				const nav = data.appliedEffects.some((e) => e.type === 'goToScene');
+				if (!nav) push('system', `[ ${data.appliedEffects.map(describeEffect).join(', ')} ]`);
+				if (game.currentSceneId !== prev) {
+					enterScene(build, game, []);
+					await requestOpening();
+				}
+			}
+		} catch {
+			push('system', '[ connection lost — try again ]');
+		} finally {
+			pending = false;
+		}
+	}
+
+	// --- parallax look (only when not typing) --------------------------------
 	let look = $state({ x: 0, y: 0 });
 	const target = { x: 0, y: 0 };
 
 	function onKeydown(e: KeyboardEvent) {
-		// While typing in the dialogue, let keys reach the input; Esc closes.
-		if (dialogue.open) {
-			if (e.key === 'Escape') closeDialogue();
-			return;
-		}
+		const el = e.target as HTMLElement | null;
+		if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA')) return;
 		switch (e.key) {
 			case 'ArrowLeft':
 				target.x = -1;
@@ -220,25 +186,26 @@
 				target.y = 1;
 				e.preventDefault();
 				break;
-			default:
-				if (/^[1-9]$/.test(e.key)) actions[Number(e.key) - 1]?.run();
 		}
 	}
-
 	function onKeyup(e: KeyboardEvent) {
 		if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') target.x = 0;
 		if (e.key === 'ArrowUp' || e.key === 'ArrowDown') target.y = 0;
 	}
 
+	let transcriptEl = $state<HTMLDivElement>();
+	$effect(() => {
+		if (lines.length && transcriptEl) transcriptEl.scrollTop = transcriptEl.scrollHeight;
+	});
+
 	onMount(() => {
-		// Swap in the published Firestore build if one exists; otherwise stay on
-		// the placeholder we already initialized with.
 		loadActiveBuild().then(({ build: loaded, source }) => {
 			buildSource = source;
 			if (source === 'firestore') {
 				build = loaded;
-				startFrom(loaded);
+				initFrom(loaded);
 			}
+			requestOpening();
 		});
 
 		let raf = 0;
@@ -257,18 +224,10 @@
 	});
 </script>
 
-<svelte:head><title>Adventure Engine — Play (placeholder)</title></svelte:head>
+<svelte:head><title>Adventure Engine — Play</title></svelte:head>
 <svelte:window onkeydown={onKeydown} onkeyup={onKeyup} />
 
 <main>
-	{#if buildSource === 'placeholder'}
-		<p class="placeholder-banner">
-			⚠ PLACEHOLDER BUILD — no published content yet; scenes, art, text &amp; story are stand-ins,
-			authored by the client later.
-		</p>
-	{:else}
-		<p class="placeholder-banner live">▶ Live build loaded from Firestore.</p>
-	{/if}
 	<div class="stage">
 		{#key game.currentSceneId}
 			{@const snap = findScene(build.scenes, game.currentSceneId)!}
@@ -276,209 +235,112 @@
 				<SceneRenderer scene={snap} {look} />
 			</div>
 		{/key}
+		<span
+			class="led {buildSource}"
+			title={buildSource === 'firestore' ? 'Live build (Firestore)' : 'Placeholder build'}
+		></span>
+		{#if buildSource === 'placeholder'}<span class="ph-tag">placeholder build</span>{/if}
+	</div>
 
-		<div class="hud">
-			<div class="log">
-				{#each log as line, i (i)}<p>{line}</p>{/each}
-			</div>
-			<nav class="actions" aria-label="Available actions">
-				{#each actions as action, i (action.kind + action.id)}
-					<button type="button" class={action.kind} onclick={action.run}>
-						<span class="num">{i + 1}</span>{action.label}
-					</button>
-				{/each}
-			</nav>
-			<p class="hint">arrow keys look around · number keys or Enter to act</p>
+	<section class="terminal">
+		<div class="transcript" bind:this={transcriptEl}>
+			{#each lines as line, i (i)}
+				<p class={line.who}>
+					{#if line.who === 'player'}<span class="who">&gt;</span>{/if}{line.text}
+				</p>
+			{/each}
+			{#if pending}<p class="system">…</p>{/if}
 		</div>
 
-		{#if dialogue.open}
-			<div class="dialogue" role="dialog" aria-label={dialogue.title}>
-				<div class="dialogue-head">
-					<span>{dialogue.title}</span>
-					<button type="button" class="close" onclick={closeDialogue}>esc ✕</button>
-				</div>
-				<div class="transcript">
-					{#each dialogue.turns as turn, i (i)}
-						<p class={turn.role}>
-							<span class="who">{turn.role === 'player' ? 'YOU' : 'COMPUTER'}</span>
-							{turn.text}
-						</p>
-					{:else}
-						<p class="empty">[ type an argument to the placeholder computer ]</p>
-					{/each}
-					{#if dialogue.pending}<p class="pending">computer is thinking…</p>{/if}
-					{#if dialogue.over}<p class="over">— conversation ended —</p>{/if}
-				</div>
-				<form
-					class="composer"
-					onsubmit={(e) => {
-						e.preventDefault();
-						sendMessage();
-					}}
-				>
-					<input
-						use:autofocus
-						placeholder="[ type your argument ]"
-						bind:value={dialogue.input}
-						disabled={dialogue.pending || dialogue.over}
-					/>
-					<button
-						type="submit"
-						disabled={dialogue.pending || dialogue.over || !dialogue.input.trim()}
-					>
-						Send
-					</button>
-				</form>
-			</div>
-		{/if}
-	</div>
+		<form
+			class="composer"
+			onsubmit={(e) => {
+				e.preventDefault();
+				sendMessage();
+			}}
+		>
+			<span class="prompt">&gt;</span>
+			<input
+				use:autofocus
+				placeholder="type to the computer…"
+				bind:value={inputText}
+				disabled={pending}
+			/>
+		</form>
+	</section>
 </main>
 
 <style>
 	main {
-		display: grid;
-		place-items: center;
+		display: flex;
+		flex-direction: column;
+		gap: 0.75rem;
+		align-items: center;
 		min-height: 100dvh;
-		padding: 1.5rem;
-	}
-
-	.placeholder-banner {
-		width: min(100%, 1280px);
-		margin: 0 0 0.75rem;
-		padding: 0.5rem 0.9rem;
-		font-size: 0.8rem;
-		letter-spacing: 0.04em;
-		color: #d8c98a;
-		background: #2a2410;
-		border: 1px dashed #6b5e2a;
-	}
-	.placeholder-banner.live {
-		color: #9fc0a8;
-		background: #122016;
-		border-color: #2a5e3a;
+		padding: 1.25rem;
 	}
 
 	.stage {
 		position: relative;
-		width: min(100%, 1280px);
+		width: min(100%, 1100px);
 		aspect-ratio: 16 / 9;
 		border: 1px solid var(--line);
 		overflow: hidden;
 	}
-
 	.scene-holder {
 		position: absolute;
 		inset: 0;
 	}
 
-	.hud {
+	.led {
 		position: absolute;
-		inset: auto 0 0 0;
+		top: 0.6rem;
+		right: 0.6rem;
 		z-index: 60;
+		width: 0.7rem;
+		height: 0.7rem;
+		border-radius: 50%;
+	}
+	.led.firestore {
+		background: #38e08a;
+		box-shadow: 0 0 8px #38e08a;
+	}
+	.led.placeholder {
+		background: #d8a23a;
+		box-shadow: 0 0 8px #d8a23a;
+	}
+	.ph-tag {
+		position: absolute;
+		top: 0.5rem;
+		right: 1.7rem;
+		z-index: 60;
+		font-size: 0.65rem;
+		letter-spacing: 0.06em;
+		color: #d8a23a;
+	}
+
+	.terminal {
+		width: min(100%, 1100px);
 		display: flex;
 		flex-direction: column;
 		gap: 0.6rem;
-		padding: 1rem 1.25rem 1.1rem;
-		background: linear-gradient(transparent, rgba(15, 17, 19, 0.9) 40%);
-	}
-
-	.log {
-		min-height: 4.5rem;
-		font-size: 0.95rem;
-		line-height: 1.45;
-	}
-	.log p {
-		margin: 0;
-		color: var(--accent);
-	}
-
-	.actions {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 0.5rem;
-	}
-
-	button {
-		font: inherit;
-		cursor: pointer;
-		color: var(--ink);
-		background: rgba(22, 25, 29, 0.85);
-		border: 1px solid var(--line);
-		padding: 0.45rem 0.8rem;
-	}
-	button:hover,
-	button:focus-visible {
-		border-color: var(--accent);
-		color: var(--accent);
-		outline: none;
-	}
-	button.exit {
-		border-style: dashed;
-	}
-
-	.num {
-		display: inline-block;
-		margin-right: 0.5rem;
-		color: var(--ink-dim);
-	}
-
-	.hint {
-		margin: 0;
-		font-size: 0.75rem;
-		letter-spacing: 0.08em;
-		color: var(--ink-dim);
-	}
-
-	.dialogue {
-		position: absolute;
-		z-index: 70;
-		left: 50%;
-		bottom: 1.25rem;
-		transform: translateX(-50%);
-		width: min(92%, 640px);
-		max-height: 70%;
-		display: flex;
-		flex-direction: column;
-		background: rgba(12, 14, 17, 0.96);
+		padding: 0.9rem 1rem;
+		background: var(--panel);
 		border: 1px solid var(--line);
 	}
-
-	.dialogue-head {
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-		padding: 0.5rem 0.75rem;
-		border-bottom: 1px solid var(--line);
-		font-size: 0.8rem;
-		letter-spacing: 0.06em;
-		color: var(--ink-dim);
-	}
-
-	.close {
-		font: inherit;
-		font-size: 0.7rem;
-		cursor: pointer;
-		color: var(--ink-dim);
-		background: transparent;
-		border: 1px solid var(--line);
-		padding: 0.2rem 0.45rem;
-	}
-
 	.transcript {
+		height: 12rem;
 		overflow-y: auto;
-		padding: 0.75rem;
 		display: flex;
 		flex-direction: column;
-		gap: 0.5rem;
-		font-size: 0.9rem;
+		gap: 0.35rem;
+		font-size: 0.95rem;
 		line-height: 1.45;
 	}
 	.transcript p {
 		margin: 0;
 	}
-	.transcript .who {
-		display: inline-block;
-		min-width: 5.5rem;
+	.transcript .narration {
 		color: var(--ink-dim);
 	}
 	.transcript .player {
@@ -487,29 +349,33 @@
 	.transcript .computer {
 		color: var(--accent);
 	}
-	.transcript .empty,
-	.transcript .pending,
-	.transcript .over {
+	.transcript .system {
 		color: var(--ink-dim);
 		font-style: italic;
+		font-size: 0.85rem;
+	}
+	.transcript .who {
+		color: var(--ink-dim);
+		margin-right: 0.4rem;
 	}
 
 	.composer {
 		display: flex;
+		align-items: center;
 		gap: 0.5rem;
-		padding: 0.75rem;
 		border-top: 1px solid var(--line);
+		padding-top: 0.6rem;
+	}
+	.composer .prompt {
+		color: var(--accent);
 	}
 	.composer input {
 		flex: 1;
 		font: inherit;
 		color: var(--ink);
-		background: #0c0e11;
-		border: 1px solid var(--line);
-		padding: 0.45rem 0.6rem;
-	}
-	.composer input:focus-visible {
+		background: transparent;
+		border: none;
 		outline: none;
-		border-color: var(--accent);
+		padding: 0.2rem 0;
 	}
 </style>

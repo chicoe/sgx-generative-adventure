@@ -30,7 +30,10 @@ export async function loadDraft(): Promise<DraftContent | null> {
 	]);
 	if (!meta.exists() && scenes.empty && items.empty && behaviours.empty) return null;
 	return {
-		meta: { startSceneId: (meta.data()?.startSceneId as string) ?? '' },
+		meta: {
+			startSceneId: (meta.data()?.startSceneId as string) ?? '',
+			defaultBehaviourId: meta.data()?.defaultBehaviourId as string | undefined
+		},
 		scenes: scenes.docs.map((d) => d.data() as Scene),
 		items: items.docs.map((d) => d.data() as Item),
 		behaviours: behaviours.docs.map((d) => d.data() as LLMBehaviour)
@@ -39,6 +42,24 @@ export async function loadDraft(): Promise<DraftContent | null> {
 
 export async function setStartScene(sceneId: string) {
 	await setDoc(rootDoc(), { startSceneId: sceneId }, { merge: true });
+}
+
+/** The ship-wide computer the player talks to in every scene. */
+export async function setDefaultBehaviour(behaviourId: string) {
+	await setDoc(rootDoc(), { defaultBehaviourId: behaviourId }, { merge: true });
+}
+
+// Editor-only graph node layout, kept on the draft root doc (not part of the
+// published build).
+export type GraphPositions = Record<string, { x: number; y: number }>;
+
+export async function loadGraphPositions(): Promise<GraphPositions> {
+	const snap = await getDoc(rootDoc());
+	return (snap.data()?.graphPositions as GraphPositions) ?? {};
+}
+
+export async function saveGraphPositions(positions: GraphPositions) {
+	await setDoc(rootDoc(), { graphPositions: clean(positions) }, { merge: true });
 }
 
 export const saveScene = (s: Scene) =>
