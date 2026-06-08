@@ -2,7 +2,7 @@
 	import { onMount } from 'svelte';
 	import { page } from '$app/state';
 	import EffectsEditor from '$lib/components/editor/EffectsEditor.svelte';
-	import { loadDraft, saveScene, deleteScene, setStartScene } from '$lib/content/draft';
+	import { loadDraft, saveScene, deleteScene } from '$lib/content/draft';
 	import { uploadImage } from '$lib/firebase/storage';
 	import type { Scene } from '$lib/engine/types';
 
@@ -77,12 +77,6 @@
 			busy = false;
 		}
 	}
-	async function makeStart() {
-		if (!current?.id) return;
-		await setStartScene(current.id);
-		startSceneId = current.id;
-		message = `"${current.id}" is now the start scene.`;
-	}
 
 	// layers
 	const addLayer = () =>
@@ -128,7 +122,9 @@
 	>
 		<option value="" disabled>— pick a scene —</option>
 		{#each scenes as s (s.id)}
-			<option value={s.id}>{s.name || s.id}{s.id === startSceneId ? '  ★ start' : ''}</option>
+			<option value={s.id}>
+				{s.name || s.id}{s.start || s.id === startSceneId ? '  ★' : ''}{s.ending ? '  ⏹' : ''}
+			</option>
 		{/each}
 	</select>
 	<button type="button" onclick={newScene}>+ New scene</button>
@@ -148,6 +144,16 @@
 			>scene prompt (context + instructions for the computer/LLM — it also sees exits & inventory)
 			<textarea rows="3" bind:value={current.prompt}></textarea>
 		</label>
+
+		<div class="roles">
+			<label class="chk"
+				><input type="checkbox" bind:checked={current.start} /> start scene (one is picked at random)</label
+			>
+			<label class="chk"
+				><input type="checkbox" bind:checked={current.ending} /> ending scene (reaching it ends the run,
+				then restarts)</label
+			>
+		</div>
 
 		<fieldset>
 			<legend>filter / CSS grade (optional)</legend>
@@ -220,9 +226,6 @@
 
 		<div class="actions">
 			<button type="button" class="primary" onclick={save} disabled={busy}>Save</button>
-			<button type="button" onclick={makeStart} disabled={busy || !current.id}
-				>Set as start scene</button
-			>
 			<button type="button" class="del" onclick={remove} disabled={busy}>Delete</button>
 		</div>
 	</div>
@@ -252,6 +255,17 @@
 	}
 	.muted {
 		color: var(--ink-dim);
+	}
+	.roles {
+		display: flex;
+		flex-direction: column;
+		gap: 0.3rem;
+		font-size: 0.8rem;
+	}
+	.chk {
+		display: flex;
+		align-items: center;
+		gap: 0.4rem;
 	}
 	.toolbar {
 		display: flex;

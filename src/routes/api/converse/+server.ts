@@ -17,8 +17,8 @@ import {
 	findOutcome,
 	fallbackOutcome,
 	resolveEffects,
-	withExitOutcomes,
-	isExitOutcomeId
+	withSyntheticOutcomes,
+	isSyntheticOutcomeId
 } from '$lib/llm/adjudicate';
 
 const requestSchema = z.object({
@@ -73,9 +73,9 @@ export const POST: RequestHandler = async ({ request }) => {
 
 	if (!body.opening && !body.playerMessage) error(400, 'playerMessage required');
 
-	// Augment the behaviour with one outcome per available exit so the model can
-	// navigate by selecting one (targets come from the scene, not the model).
-	const behaviour = withExitOutcomes(await resolveBehaviour(body), body.sceneContext?.exits);
+	// Augment with synthesized outcomes: a neutral "just reply" option + one per
+	// available exit (targets come from the scene, not the model).
+	const behaviour = withSyntheticOutcomes(await resolveBehaviour(body), body.sceneContext?.exits);
 	const history = body.history as ConversationTurn[];
 
 	let reply = FALLBACK_REPLY;
@@ -105,7 +105,7 @@ export const POST: RequestHandler = async ({ request }) => {
 	// apply just their goToScene (no behaviour-level granted/denied effects).
 	const appliedEffects = body.opening
 		? []
-		: isExitOutcomeId(outcome.id)
+		: isSyntheticOutcomeId(outcome.id)
 			? outcome.effects
 			: resolveEffects(behaviour, outcome);
 	const playerTurns = history.filter((t) => t.role === 'player').length + (body.opening ? 0 : 1);

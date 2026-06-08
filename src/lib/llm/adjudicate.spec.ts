@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import { findOutcome, fallbackOutcome, resolveEffects } from './adjudicate';
+import {
+	findOutcome,
+	fallbackOutcome,
+	resolveEffects,
+	withSyntheticOutcomes,
+	isSyntheticOutcomeId,
+	NEUTRAL_OUTCOME_ID
+} from './adjudicate';
 import type { LLMBehaviour } from '../engine/types';
 
 const behaviour: LLMBehaviour = {
@@ -46,6 +53,25 @@ describe('fallbackOutcome', () => {
 		const fb = fallbackOutcome(onlyGrant);
 		expect(fb.granted).toBe(false);
 		expect(fb.effects).toEqual([]);
+	});
+});
+
+describe('withSyntheticOutcomes', () => {
+	it('always adds a neutral no-change outcome', () => {
+		const aug = withSyntheticOutcomes(behaviour, []);
+		const neutral = findOutcome(aug, NEUTRAL_OUTCOME_ID);
+		expect(neutral?.granted).toBe(false);
+		expect(neutral?.effects).toEqual([]);
+		expect(isSyntheticOutcomeId(NEUTRAL_OUTCOME_ID)).toBe(true);
+	});
+
+	it('adds one granted goToScene outcome per exit', () => {
+		const aug = withSyntheticOutcomes(behaviour, [{ label: 'North', toSceneId: 'hall' }]);
+		const exit = findOutcome(aug, 'exit:hall');
+		expect(exit?.granted).toBe(true);
+		expect(exit?.effects).toEqual([{ type: 'goToScene', sceneId: 'hall' }]);
+		expect(isSyntheticOutcomeId('exit:hall')).toBe(true);
+		expect(isSyntheticOutcomeId('grant')).toBe(false);
 	});
 });
 

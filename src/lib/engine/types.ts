@@ -73,6 +73,8 @@ export interface Scene {
 	onEnter?: Effect[];
 	introText?: string; // optional narration shown on enter
 	prompt?: string; // scene description + instructions given to the LLM as context
+	start?: boolean; // a possible starting scene — one is chosen at random per run
+	ending?: boolean; // reaching it ends the run (then auto/interaction restart)
 }
 
 // ---------------------------------------------------------------------------

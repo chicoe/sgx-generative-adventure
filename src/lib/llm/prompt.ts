@@ -61,9 +61,15 @@ export function buildPrompt(
 		'Respond in character, then choose exactly ONE outcomeId from this list:',
 		outcomes,
 		'',
-		'Use the scene context to converse naturally. You may only change the game by selecting one',
-		'of the allowed outcomes — never invent outcomes or effects. Return only the structured fields:',
-		'a short in-character `reply`, the chosen `outcomeId`, and optional `reasoning`.'
+		'RULES:',
+		'- You may ONLY move the player through the exits listed under AVAILABLE EXITS. Never mention,',
+		'  offer, or imply you can go anywhere that is not in that list. If the player asks for a place',
+		'  that is not an available exit, say in character that there is no route there.',
+		'- Most turns are ordinary conversation: when no listed action or exit clearly applies, pick the',
+		'  "no change" outcome and simply reply. Only pick an action or exit outcome when the player',
+		'  clearly intends it.',
+		'- Never invent outcomes or effects. Return only a short in-character `reply`, the chosen',
+		'  `outcomeId`, and optional `reasoning`.'
 	);
 
 	const transcript = history.length

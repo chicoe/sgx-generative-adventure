@@ -1,3 +1,33 @@
+/* Self-hosted Monaspace (SIL OFL) — Neon for UI, Krypton for the game terminal. */
+@font-face {
+	font-family: 'Monaspace Neon';
+	src: url('/fonts/MonaspaceNeon-Regular.woff2') format('woff2');
+	font-weight: 400;
+	font-style: normal;
+	font-display: swap;
+}
+@font-face {
+	font-family: 'Monaspace Neon';
+	src: url('/fonts/MonaspaceNeon-Bold.woff2') format('woff2');
+	font-weight: 700;
+	font-style: normal;
+	font-display: swap;
+}
+@font-face {
+	font-family: 'Monaspace Krypton';
+	src: url('/fonts/MonaspaceKrypton-Regular.woff2') format('woff2');
+	font-weight: 400;
+	font-style: normal;
+	font-display: swap;
+}
+@font-face {
+	font-family: 'Monaspace Krypton';
+	src: url('/fonts/MonaspaceKrypton-Bold.woff2') format('woff2');
+	font-weight: 700;
+	font-style: normal;
+	font-display: swap;
+}
+
 /* Neutral dev-scaffold palette. This is utilitarian chrome, NOT the game's
    visual direction — the client provides real art/theme later. Keep it plain. */
 :root {
@@ -7,7 +37,10 @@
 	--ink: #c2c8cf;
 	--ink-dim: #6b7178;
 	--accent: #9fb0c0;
-	font-family: ui-monospace, 'SF Mono', 'Cascadia Code', 'Roboto Mono', Menlo, Consolas, monospace;
+	--mono: ui-monospace, 'SF Mono', 'Cascadia Code', 'Roboto Mono', Menlo, Consolas, monospace;
+	--font-ui: 'Monaspace Neon', var(--mono);
+	--font-terminal: 'Monaspace Krypton', var(--mono);
+	font-family: var(--font-ui);
 }
 
 * {

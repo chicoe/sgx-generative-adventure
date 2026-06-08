@@ -2,7 +2,7 @@
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
-	import { SvelteFlow, Background, Controls } from '@xyflow/svelte';
+	import { SvelteFlow, Background, Controls, MarkerType } from '@xyflow/svelte';
 	import type { Node, Edge, Connection } from '@xyflow/svelte';
 	import '@xyflow/svelte/dist/style.css';
 	import SceneNode from '$lib/components/editor/SceneNode.svelte';
@@ -36,6 +36,7 @@
 		!p ? '' : /^(https?:)?\/\//.test(p) || p.startsWith('/') ? p : `/${p}`;
 
 	function buildGraph() {
+		const anyStartFlag = scenes.some((s) => s.start);
 		nodes = scenes.map((s, i) => ({
 			id: s.id,
 			type: 'scene',
@@ -43,7 +44,8 @@
 			deletable: false,
 			data: {
 				label: s.name || s.id,
-				isStart: s.id === startSceneId,
+				isStart: s.start || (!anyStartFlag && s.id === startSceneId),
+				isEnding: !!s.ending,
 				images: [...s.layers]
 					.sort((a, b) => a.z - b.z)
 					.map((l) => imgUrl(l.imagePath))
@@ -58,6 +60,8 @@
 					source: s.id,
 					target: x.toSceneId,
 					label: x.label || undefined,
+					style: 'stroke: #38e08a;',
+					markerEnd: { type: MarkerType.ArrowClosed, color: '#38e08a', width: 18, height: 18 },
 					data: { sceneId: s.id, exitId: x.id }
 				}))
 		);
@@ -186,8 +190,9 @@
 	{#if message}<span class="msg">{message}</span>{/if}
 </div>
 <p class="hint">
-	drag between nodes to add an exit · click a link to rename/remove it · drag nodes to arrange
-	(saved) · click a node to edit it
+	drag from a node's <span class="k-exit">exit</span> handle (green, bottom) to another node's
+	<span class="k-enter">entrance</span> handle (blue, top) — arrows point the way · click a link to rename/remove
+	· drag nodes to arrange (saved) · click a node to edit
 </p>
 
 {#if selectedExit}
@@ -255,6 +260,12 @@
 		margin: 0.4rem 0 0;
 		font-size: 0.8rem;
 		color: var(--ink-dim);
+	}
+	.k-exit {
+		color: #38e08a;
+	}
+	.k-enter {
+		color: #7aa2f7;
 	}
 	.edge-editor {
 		display: flex;

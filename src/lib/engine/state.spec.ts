@@ -6,6 +6,7 @@ import {
 	createGameState,
 	goToScene,
 	historyFor,
+	pickStartScene,
 	startGame,
 	takeExit
 } from './state';
@@ -19,6 +20,24 @@ describe('startGame', () => {
 		expect(state.currentSceneId).toBe('bridge');
 		expect(state.visitedScenes).toEqual(['bridge']);
 		expect(state.flags.visitedBridge).toBe(true);
+	});
+});
+
+describe('pickStartScene', () => {
+	const twoStarts = {
+		...testBuild,
+		scenes: testBuild.scenes.map((s) =>
+			s.id === 'bridge' || s.id === 'airlock' ? { ...s, start: true } : s
+		)
+	};
+
+	it('picks a random scene among flagged starts', () => {
+		expect(pickStartScene(twoStarts, () => 0)).toBe('bridge');
+		expect(pickStartScene(twoStarts, () => 0.99)).toBe('airlock');
+	});
+
+	it('falls back to meta.startSceneId when no scene is flagged', () => {
+		expect(pickStartScene(testBuild, () => 0.99)).toBe('bridge');
 	});
 });
 

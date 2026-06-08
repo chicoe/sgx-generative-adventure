@@ -30,24 +30,41 @@ export function resolveEffects(behaviour: LLMBehaviour, outcome: Outcome): Effec
 }
 
 const EXIT_OUTCOME_PREFIX = 'exit:';
+export const NEUTRAL_OUTCOME_ID = '__none__';
 
 /** True for a synthesized "take the player through an exit" outcome. */
 export function isExitOutcomeId(id: string): boolean {
 	return id.startsWith(EXIT_OUTCOME_PREFIX);
 }
 
+/** Synthesized outcomes (neutral + exits) never carry behaviour-level effects. */
+export function isSyntheticOutcomeId(id: string): boolean {
+	return id === NEUTRAL_OUTCOME_ID || isExitOutcomeId(id);
+}
+
 /**
- * Augment a behaviour with one granted outcome per available exit, so the LLM
- * can move the player by selecting it. The targets come from the scene's real
- * exits (never the model), keeping transitions deterministic.
+ * Augment a behaviour with synthesized outcomes the model can always pick:
+ *  - a NEUTRAL "no change, just reply" outcome, so ordinary conversation doesn't
+ *    fire the behaviour's authored effects, and
+ *  - one granted outcome per available exit, so it can move the player.
+ * Exit targets come from the scene's real exits — never invented by the model —
+ * keeping transitions deterministic.
  */
-export function withExitOutcomes(
+export function withSyntheticOutcomes(
 	behaviour: LLMBehaviour,
 	exits: { label: string; toSceneId: string }[] = []
 ): LLMBehaviour {
-	if (!exits.length) return behaviour;
 	const ids = new Set(behaviour.allowedOutcomes.map((o) => o.id));
 	const extra: Outcome[] = [];
+	if (!ids.has(NEUTRAL_OUTCOME_ID)) {
+		extra.push({
+			id: NEUTRAL_OUTCOME_ID,
+			label: 'No change — just reply in character (use this for ordinary conversation)',
+			granted: false,
+			effects: []
+		});
+		ids.add(NEUTRAL_OUTCOME_ID);
+	}
 	for (const e of exits) {
 		const id = `${EXIT_OUTCOME_PREFIX}${e.toSceneId}`;
 		if (ids.has(id)) continue;

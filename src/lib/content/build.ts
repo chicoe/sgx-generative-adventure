@@ -61,8 +61,11 @@ function validateReferences(draft: DraftContent): string[] {
 		if (!itemIds.has(id)) errors.push(`${where} references unknown item "${id}"`);
 	};
 
-	if (!sceneIds.has(draft.meta.startSceneId)) {
+	if (draft.meta.startSceneId && !sceneIds.has(draft.meta.startSceneId)) {
 		errors.push(`startSceneId "${draft.meta.startSceneId}" is not an existing scene`);
+	}
+	if (!draft.scenes.some((s) => s.start) && !sceneIds.has(draft.meta.startSceneId)) {
+		errors.push('No start scene — mark at least one scene as a start.');
 	}
 	if (draft.meta.defaultBehaviourId && !behaviourIds.has(draft.meta.defaultBehaviourId)) {
 		errors.push(

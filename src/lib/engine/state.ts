@@ -16,13 +16,26 @@ export function createGameState(startSceneId: string): GameState {
 }
 
 /**
- * Begin a new game from a Build: create state at the start scene and apply that
- * scene's `onEnter` effects.
+ * Choose a starting scene: a random scene flagged `start`, else the legacy
+ * `meta.startSceneId`, else the first scene. `rng` is injectable for tests.
+ */
+export function pickStartScene(build: Build, rng: () => number = Math.random): string {
+	const starts = build.scenes.filter((s) => s.start).map((s) => s.id);
+	if (starts.length) return starts[Math.floor(rng() * starts.length)];
+	if (build.meta.startSceneId && findScene(build.scenes, build.meta.startSceneId)) {
+		return build.meta.startSceneId;
+	}
+	return build.scenes[0]?.id ?? '';
+}
+
+/**
+ * Begin a new game from a Build: create state at a (randomly chosen) start scene
+ * and apply that scene's `onEnter` effects.
  */
 export function startGame(build: Build): EffectResult {
-	const base = createGameState(build.meta.startSceneId);
-	const scene = findScene(build.scenes, build.meta.startSceneId);
-	return applyEffectsResult(base, scene?.onEnter);
+	const startSceneId = pickStartScene(build);
+	const base = createGameState(startSceneId);
+	return applyEffectsResult(base, findScene(build.scenes, startSceneId)?.onEnter);
 }
 
 /**

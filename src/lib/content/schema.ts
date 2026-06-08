@@ -66,7 +66,9 @@ export const sceneSchema = z.object({
 	exits: z.array(exitSchema),
 	onEnter: z.array(effectSchema).optional(),
 	introText: z.string().optional(),
-	prompt: z.string().optional()
+	prompt: z.string().optional(),
+	start: z.boolean().optional(),
+	ending: z.boolean().optional()
 });
 
 export const itemSchema = z.object({

@@ -42,6 +42,7 @@ export const placeholderBuild: Build = {
 		{
 			id: 'scene-a',
 			name: 'Scene A (placeholder)',
+			start: true,
 			introText: '[ placeholder intro text for Scene A — replace via editor ]',
 			prompt:
 				'[ placeholder scene prompt for Scene A — describe the location and tell the computer how to behave here; the LLM also sees the exits and the player inventory ]',

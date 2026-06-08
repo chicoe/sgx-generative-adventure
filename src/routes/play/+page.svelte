@@ -33,10 +33,20 @@
 	let buildSource = $state<'firestore' | 'placeholder'>('placeholder');
 	let game = $state<GameState>(startGame(placeholderBuild).state);
 
-	type Line = { who: 'narration' | 'player' | 'computer' | 'system'; text: string };
+	type Line = {
+		id: number;
+		who: 'narration' | 'player' | 'computer' | 'system';
+		text: string;
+		revealed: number;
+	};
+	let lineSeq = 0;
 	let lines = $state<Line[]>([]);
 	let inputText = $state('');
 	let pending = $state(false);
+	let spinner = $state('|');
+	let atEnding = $state(false);
+	let endingTimer: ReturnType<typeof setTimeout> | undefined;
+	const ENDING_RESTART_MS = 180_000; // 3 minutes at an ending → auto restart
 
 	// The computer the terminal is talking to (the current scene's), plus that
 	// conversation's history for the LLM.
@@ -46,7 +56,30 @@
 	const scene = $derived(findScene(build.scenes, game.currentSceneId)!);
 
 	function push(who: Line['who'], text?: string | null) {
-		if (text) lines = [...lines, { who, text }].slice(-200);
+		if (!text) return;
+		// Player echoes and system notes appear instantly; the computer & narration
+		// "type out" character by character.
+		const instant = who === 'player' || who === 'system';
+		const line: Line = { id: lineSeq++, who, text, revealed: instant ? text.length : 0 };
+		lines = [...lines, line].slice(-200);
+		if (!instant) typeOut(line.id);
+	}
+
+	function typeOut(id: number) {
+		if (typeof window === 'undefined') return; // browser only (no SSR timer leak)
+		const target = lines.find((l) => l.id === id);
+		if (!target) return;
+		const step = Math.max(1, Math.ceil(target.text.length / 100));
+		const tick = setInterval(() => {
+			const l = lines.find((x) => x.id === id);
+			if (!l) {
+				clearInterval(tick);
+				return;
+			}
+			l.revealed = Math.min(l.text.length, l.revealed + step);
+			if (transcriptEl) transcriptEl.scrollTop = transcriptEl.scrollHeight;
+			if (l.revealed >= l.text.length) clearInterval(tick);
+		}, 16);
 	}
 	// One ship-wide computer for the whole game; per-scene flavour comes from the
 	// scene's `prompt`. (Behaviour-on-hotspot was dropped.)
@@ -111,9 +144,42 @@
 		}
 	}
 
+	function clearEndingTimer() {
+		if (endingTimer) clearTimeout(endingTimer);
+		endingTimer = undefined;
+	}
+
+	// After entering a scene: an ending freezes into "THE END" and arms the auto-
+	// restart timer; otherwise the computer greets.
+	async function afterEnter() {
+		clearEndingTimer();
+		const s = findScene(build.scenes, game.currentSceneId);
+		if (s?.ending) {
+			atEnding = true;
+			push('system', '[ THE END — type anything (or wait) to begin again ]');
+			endingTimer = setTimeout(() => restart(), ENDING_RESTART_MS);
+		} else {
+			atEnding = false;
+			await requestOpening();
+		}
+	}
+
+	async function restart() {
+		clearEndingTimer();
+		atEnding = false;
+		initFrom(build); // picks a fresh random start, resets transcript + state
+		await afterEnter();
+	}
+
 	async function sendMessage() {
 		const text = inputText.trim();
 		if (!text || pending) return;
+		// At an ending, any input begins a new run.
+		if (atEnding) {
+			inputText = '';
+			await restart();
+			return;
+		}
 		push('player', text);
 		inputText = '';
 
@@ -152,7 +218,7 @@
 				if (!nav) push('system', `[ ${data.appliedEffects.map(describeEffect).join(', ')} ]`);
 				if (game.currentSceneId !== prev) {
 					enterScene(build, game, []);
-					await requestOpening();
+					await afterEnter();
 				}
 			}
 		} catch {
@@ -198,6 +264,15 @@
 		if (lines.length && transcriptEl) transcriptEl.scrollTop = transcriptEl.scrollHeight;
 	});
 
+	// Spinning processing cursor while the computer is thinking.
+	$effect(() => {
+		if (!pending) return;
+		const frames = ['|', '/', '-', '\\'];
+		let i = 0;
+		const id = setInterval(() => (spinner = frames[i++ % frames.length]), 110);
+		return () => clearInterval(id);
+	});
+
 	onMount(() => {
 		loadActiveBuild().then(({ build: loaded, source }) => {
 			buildSource = source;
@@ -205,7 +280,7 @@
 				build = loaded;
 				initFrom(loaded);
 			}
-			requestOpening();
+			afterEnter();
 		});
 
 		let raf = 0;
@@ -220,7 +295,10 @@
 			raf = requestAnimationFrame(tick);
 		};
 		raf = requestAnimationFrame(tick);
-		return () => cancelAnimationFrame(raf);
+		return () => {
+			cancelAnimationFrame(raf);
+			clearEndingTimer();
+		};
 	});
 </script>
 
@@ -244,12 +322,15 @@
 
 	<section class="terminal">
 		<div class="transcript" bind:this={transcriptEl}>
-			{#each lines as line, i (i)}
+			{#each lines as line (line.id)}
 				<p class={line.who}>
-					{#if line.who === 'player'}<span class="who">&gt;</span>{/if}{line.text}
+					{#if line.who === 'player'}<span class="who">&gt;</span>{/if}{line.text.slice(
+						0,
+						line.revealed
+					)}
 				</p>
 			{/each}
-			{#if pending}<p class="system">…</p>{/if}
+			{#if pending}<p class="spinner">{spinner}</p>{/if}
 		</div>
 
 		<form
@@ -262,7 +343,7 @@
 			<span class="prompt">&gt;</span>
 			<input
 				use:autofocus
-				placeholder="type to the computer…"
+				placeholder={atEnding ? 'type anything to play again…' : 'type to the computer…'}
 				bind:value={inputText}
 				disabled={pending}
 			/>
@@ -327,6 +408,7 @@
 		padding: 0.9rem 1rem;
 		background: var(--panel);
 		border: 1px solid var(--line);
+		font-family: var(--font-terminal);
 	}
 	.transcript {
 		height: 12rem;
@@ -353,6 +435,9 @@
 		color: var(--ink-dim);
 		font-style: italic;
 		font-size: 0.85rem;
+	}
+	.transcript .spinner {
+		color: var(--accent);
 	}
 	.transcript .who {
 		color: var(--ink-dim);

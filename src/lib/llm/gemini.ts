@@ -12,7 +12,8 @@ import type { ConversationTurn, LLMBehaviour } from '../engine/types';
 import { buildPrompt, type SceneContext } from './prompt';
 import { llmResponseSchema, type LlmResponse } from './outcome';
 
-const TIMEOUT_MS = 6000;
+const TIMEOUT_MS = 12000;
+const MAX_ATTEMPTS = 2; // one retry on transient failure before the fallback
 const DEFAULT_MODEL = 'gemini-2.5-flash-lite';
 
 type Backend = 'developer' | 'vertex';
@@ -81,21 +82,39 @@ export async function generateLlmResponse(
 		scene,
 		opening
 	);
-	const outcomeIds = behaviour.allowedOutcomes.map((o) => o.id);
+	const config = {
+		systemInstruction,
+		responseMimeType: 'application/json',
+		responseSchema: responseSchema(behaviour.allowedOutcomes.map((o) => o.id)),
+		temperature: 0.8
+	};
 
-	const res = await ai.models.generateContent({
-		model,
-		contents: userPrompt,
-		config: {
-			systemInstruction,
-			responseMimeType: 'application/json',
-			responseSchema: responseSchema(outcomeIds),
-			temperature: 0.8,
-			abortSignal: AbortSignal.timeout(TIMEOUT_MS)
+	let lastErr: unknown;
+	for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+		try {
+			const res = await ai.models.generateContent({
+				model,
+				contents: userPrompt,
+				config: { ...config, abortSignal: AbortSignal.timeout(TIMEOUT_MS) }
+			});
+			const text = res.text;
+			if (!text) throw new Error('Empty response from Gemini');
+			return llmResponseSchema.parse(JSON.parse(stripFences(text)));
+		} catch (err) {
+			lastErr = err;
+			if (attempt < MAX_ATTEMPTS) await new Promise((r) => setTimeout(r, 400));
 		}
-	});
+	}
+	throw lastErr;
+}
 
-	const text = res.text;
-	if (!text) throw new Error('Empty response from Gemini');
-	return llmResponseSchema.parse(JSON.parse(text));
+/** Tolerate ```json ... ``` fences some models add despite responseMimeType. */
+function stripFences(text: string): string {
+	const t = text.trim();
+	return t.startsWith('```')
+		? t
+				.replace(/^```(?:json)?/i, '')
+				.replace(/```$/, '')
+				.trim()
+		: t;
 }
