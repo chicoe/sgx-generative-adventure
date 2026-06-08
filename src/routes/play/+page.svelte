@@ -52,6 +52,28 @@
 	function computeScale() {
 		scale = Math.min(1, window.innerWidth / GAME_W, window.innerHeight / GAME_H);
 	}
+
+	// --- title/status bar -----------------------------------------------------
+	// `clockNow` ticks once a second (set in onMount) and drives the fake clock
+	// and the draining vitals readout.
+	let clockNow = $state(Date.now());
+	let vitalsStartedAt = $state(Date.now());
+	const VITALS_START = 80; // %
+	const VITALS_DRAIN_MS = 300_000; // depletes to 0% over 5 minutes, then "ERROR"
+
+	// A fictional off-world clock: a cycle of 20 arcs × 90 marks × 90 beats,
+	// ticking one beat per real second (numbers run past 60, so it never reads as
+	// Earth time). This is interface chrome, not story content.
+	const alienTime = $derived.by(() => {
+		const beats = Math.floor(clockNow / 1000);
+		const p = (n: number) => String(n).padStart(2, '0');
+		return `CYC ${Math.floor(beats / 162000)} · ${p(Math.floor(beats / 8100) % 20)}:${p(Math.floor(beats / 90) % 90)}:${p(beats % 90)}`;
+	});
+	// Drains linearly from 80% to 0 over 5 minutes; ≤0 renders as "ERROR".
+	const vitalsPct = $derived(
+		Math.max(0, VITALS_START * (1 - (clockNow - vitalsStartedAt) / VITALS_DRAIN_MS))
+	);
+
 	let atEnding = $state(false);
 	let endingTimer: ReturnType<typeof setTimeout> | undefined;
 	const ENDING_RESTART_MS = 180_000; // 3 minutes at an ending → auto restart
@@ -121,6 +143,7 @@
 		const started = startGame(b);
 		game = started.state;
 		lines = [];
+		vitalsStartedAt = Date.now(); // a fresh run starts at full(ish) vitals
 		enterScene(b, started.state, started.messages);
 	}
 
@@ -287,6 +310,7 @@
 
 	onMount(() => {
 		computeScale();
+		const clockId = setInterval(() => (clockNow = Date.now()), 1000);
 		loadActiveBuild().then(({ build: loaded, source }) => {
 			buildSource = source;
 			if (source === 'firestore') {
@@ -310,6 +334,7 @@
 		raf = requestAnimationFrame(tick);
 		return () => {
 			cancelAnimationFrame(raf);
+			clearInterval(clockId);
 			clearEndingTimer();
 		};
 	});
@@ -320,6 +345,29 @@
 
 <main class="letterbox">
 	<div class="frame" style:transform="scale({scale})">
+		<header class="statusbar">
+			<div class="grp">
+				<span class="sys">ARG-OS v0.5.2 beta</span>
+				<span class="sep">·</span>
+				<span class="clock">{alienTime}</span>
+			</div>
+			<div class="grp center">
+				<span class="lbl">LOC</span>
+				<span class="room">{scene.name}</span>
+			</div>
+			<div class="grp right">
+				<span class="status">⚠ CRITICAL</span>
+				<span class="vitals" class:low={vitalsPct <= 25}>
+					VITALS {vitalsPct <= 0 ? 'ERROR' : `${Math.round(vitalsPct)}%`}
+				</span>
+				{#if buildSource === 'placeholder'}<span class="ph-tag">PLACEHOLDER</span>{/if}
+				<span
+					class="led {buildSource}"
+					title={buildSource === 'firestore' ? 'Live build (Firestore)' : 'Placeholder build'}
+				></span>
+			</div>
+		</header>
+
 		<div class="stage">
 			{#key game.currentSceneId}
 				{@const snap = findScene(build.scenes, game.currentSceneId)!}
@@ -334,11 +382,6 @@
 					{/if}
 				</div>
 			{/key}
-			<span
-				class="led {buildSource}"
-				title={buildSource === 'firestore' ? 'Live build (Firestore)' : 'Placeholder build'}
-			></span>
-			{#if buildSource === 'placeholder'}<span class="ph-tag">placeholder build</span>{/if}
 		</div>
 
 		<section class="terminal">
@@ -499,13 +542,80 @@
 		background: rgba(10, 8, 5, 0.6);
 	}
 
-	.led {
+	/* Title/status bar overlay docked at the top, floating over the scene. */
+	.statusbar {
 		position: absolute;
-		top: 0.6rem;
-		right: 0.6rem;
-		z-index: 60;
-		width: 0.7rem;
-		height: 0.7rem;
+		left: 1.2rem;
+		right: 1.2rem;
+		top: 1.2rem;
+		z-index: 80;
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 0.8rem;
+		padding: 0.45rem 0.9rem;
+		background: rgba(10, 8, 5, 0.74);
+		border: 1px solid var(--line);
+		font-family: var(--font-ui);
+		font-size: 0.78rem;
+		letter-spacing: 0.04em;
+		color: var(--ink);
+		text-shadow: var(--glow);
+		box-shadow: 0 0 22px rgba(255, 176, 0, 0.06);
+		backdrop-filter: blur(2px);
+	}
+	.statusbar .grp {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		white-space: nowrap;
+	}
+	.statusbar .grp.right {
+		gap: 0.8rem;
+	}
+	.statusbar .sys {
+		font-weight: 700;
+		color: var(--accent);
+	}
+	.statusbar .sep {
+		color: var(--ink-dim);
+	}
+	.statusbar .lbl {
+		color: var(--ink-dim);
+		font-size: 0.7rem;
+	}
+	.statusbar .room {
+		text-transform: uppercase;
+	}
+	.statusbar .status {
+		color: #ff5a3c;
+		font-weight: 700;
+		text-shadow: 0 0 8px rgba(255, 90, 60, 0.5);
+		animation: alarm 1.1s ease-in-out infinite;
+	}
+	.statusbar .vitals.low {
+		color: #ff5a3c;
+		text-shadow: 0 0 8px rgba(255, 90, 60, 0.5);
+	}
+	@keyframes alarm {
+		0%,
+		100% {
+			opacity: 1;
+		}
+		50% {
+			opacity: 0.4;
+		}
+	}
+	@media (prefers-reduced-motion: reduce) {
+		.statusbar .status {
+			animation: none;
+		}
+	}
+
+	.led {
+		display: inline-block;
+		width: 0.6rem;
+		height: 0.6rem;
 		border-radius: 50%;
 	}
 	.led.firestore {
@@ -517,12 +627,8 @@
 		box-shadow: 0 0 8px #d8a23a;
 	}
 	.ph-tag {
-		position: absolute;
-		top: 0.5rem;
-		right: 1.7rem;
-		z-index: 60;
-		font-size: 0.65rem;
-		letter-spacing: 0.06em;
+		font-size: 0.68rem;
+		letter-spacing: 0.08em;
 		color: #d8a23a;
 	}
 
