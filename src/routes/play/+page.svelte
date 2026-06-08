@@ -6,7 +6,15 @@
 	import { startGame, takeExit, activateHotspot } from '$lib/engine/state';
 	import { availableExits, availableHotspots, findScene } from '$lib/engine/graph';
 	import { applyEffects } from '$lib/engine/effects';
-	import type { ConversationTurn, Effect, Exit, GameState, Hotspot } from '$lib/engine/types';
+	import { loadActiveBuild } from '$lib/content/loader';
+	import type {
+		Build,
+		ConversationTurn,
+		Effect,
+		Exit,
+		GameState,
+		Hotspot
+	} from '$lib/engine/types';
 
 	const clamp = (n: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, n));
 
@@ -30,8 +38,12 @@
 	}
 
 	// --- game state ----------------------------------------------------------
-	// NB: don't name this `state` — the `$state` rune clashes with a variable
-	// named `state` (it reads as a legacy store subscription) under svelte-check.
+	// NB: don't name game state `state` — the `$state` rune clashes with a
+	// variable named `state` (reads as a legacy store subscription) in svelte-check.
+	// We start synchronously on the in-repo placeholder build, then swap in the
+	// published Firestore build (if any) on mount.
+	let build = $state<Build>(placeholderBuild);
+	let buildSource = $state<'firestore' | 'placeholder'>('placeholder');
 	const init = startGame(placeholderBuild);
 	let game = $state(init.state);
 	const startScene = findScene(placeholderBuild.scenes, init.state.currentSceneId);
@@ -39,7 +51,14 @@
 		[...init.messages, startScene?.introText].filter((l): l is string => Boolean(l)).slice(-6)
 	);
 
-	const scene = $derived(findScene(placeholderBuild.scenes, game.currentSceneId)!);
+	function startFrom(b: Build) {
+		const started = startGame(b);
+		game = started.state;
+		const intro = findScene(b.scenes, started.state.currentSceneId)?.introText;
+		log = [...started.messages, intro].filter((l): l is string => Boolean(l)).slice(-6);
+	}
+
+	const scene = $derived(findScene(build.scenes, game.currentSceneId)!);
 
 	type Action = { kind: 'hotspot' | 'exit'; id: string; label: string; run: () => void };
 	const actions: Action[] = $derived([
@@ -59,19 +78,19 @@
 		game = res.state;
 		const lines = [...res.messages];
 		if (game.currentSceneId !== prevSceneId) {
-			const intro = findScene(placeholderBuild.scenes, game.currentSceneId)?.introText;
+			const intro = findScene(build.scenes, game.currentSceneId)?.introText;
 			if (intro) lines.push(intro);
 		}
 		pushLog(lines);
 	}
 
 	function runExit(exit: Exit) {
-		applyMove(game.currentSceneId, takeExit(game, placeholderBuild, exit));
+		applyMove(game.currentSceneId, takeExit(game, build, exit));
 	}
 
 	function runHotspot(hotspot: Hotspot) {
 		const prev = game.currentSceneId;
-		const res = activateHotspot(game, placeholderBuild, hotspot);
+		const res = activateHotspot(game, build, hotspot);
 		applyMove(prev, res);
 		if (res.openBehaviourId) openDialogue(res.openBehaviourId);
 	}
@@ -96,7 +115,7 @@
 	});
 
 	function openDialogue(behaviourId: string) {
-		const behaviour = placeholderBuild.behaviours.find((b) => b.id === behaviourId);
+		const behaviour = build.behaviours.find((b) => b.id === behaviourId);
 		dialogue = {
 			open: true,
 			behaviourId,
@@ -203,6 +222,16 @@
 	}
 
 	onMount(() => {
+		// Swap in the published Firestore build if one exists; otherwise stay on
+		// the placeholder we already initialized with.
+		loadActiveBuild().then(({ build: loaded, source }) => {
+			buildSource = source;
+			if (source === 'firestore') {
+				build = loaded;
+				startFrom(loaded);
+			}
+		});
+
 		let raf = 0;
 		let t = 0;
 		const tick = () => {
@@ -223,12 +252,17 @@
 <svelte:window onkeydown={onKeydown} onkeyup={onKeyup} />
 
 <main>
-	<p class="placeholder-banner">
-		⚠ PLACEHOLDER BUILD — scenes, art, text & story are stand-ins, authored by the client later.
-	</p>
+	{#if buildSource === 'placeholder'}
+		<p class="placeholder-banner">
+			⚠ PLACEHOLDER BUILD — no published content yet; scenes, art, text &amp; story are stand-ins,
+			authored by the client later.
+		</p>
+	{:else}
+		<p class="placeholder-banner live">▶ Live build loaded from Firestore.</p>
+	{/if}
 	<div class="stage">
 		{#key game.currentSceneId}
-			{@const snap = findScene(placeholderBuild.scenes, game.currentSceneId)!}
+			{@const snap = findScene(build.scenes, game.currentSceneId)!}
 			<div class="scene-holder" in:fade={{ duration: 450 }} out:fade={{ duration: 300 }}>
 				<SceneRenderer scene={snap} {look} />
 			</div>
@@ -308,6 +342,11 @@
 		color: #d8c98a;
 		background: #2a2410;
 		border: 1px dashed #6b5e2a;
+	}
+	.placeholder-banner.live {
+		color: #9fc0a8;
+		background: #122016;
+		border-color: #2a5e3a;
 	}
 
 	.stage {

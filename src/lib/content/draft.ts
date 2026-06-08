@@ -1,0 +1,57 @@
+// Editor draft content access via the browser SDK (SPEC §4.6 draft/*). Writes
+// require an allowlisted editor (enforced by firestore.rules isEditor()).
+// Layout: draft/content (doc, holds startSceneId) + scenes/items/behaviours
+// subcollections.
+import {
+	collection,
+	deleteDoc,
+	doc,
+	getDoc,
+	getDocs,
+	setDoc,
+	writeBatch
+} from 'firebase/firestore';
+import { db } from '../firebase/client';
+import type { Build, Item, LLMBehaviour, Scene } from '../engine/types';
+import type { DraftContent } from './build';
+
+const rootDoc = () => doc(db(), 'draft', 'content');
+
+export async function loadDraft(): Promise<DraftContent | null> {
+	const [meta, scenes, items, behaviours] = await Promise.all([
+		getDoc(rootDoc()),
+		getDocs(collection(db(), 'draft', 'content', 'scenes')),
+		getDocs(collection(db(), 'draft', 'content', 'items')),
+		getDocs(collection(db(), 'draft', 'content', 'behaviours'))
+	]);
+	if (!meta.exists() && scenes.empty && items.empty && behaviours.empty) return null;
+	return {
+		meta: { startSceneId: (meta.data()?.startSceneId as string) ?? '' },
+		scenes: scenes.docs.map((d) => d.data() as Scene),
+		items: items.docs.map((d) => d.data() as Item),
+		behaviours: behaviours.docs.map((d) => d.data() as LLMBehaviour)
+	};
+}
+
+export async function setStartScene(sceneId: string) {
+	await setDoc(rootDoc(), { startSceneId: sceneId }, { merge: true });
+}
+
+export const saveScene = (s: Scene) => setDoc(doc(db(), 'draft', 'content', 'scenes', s.id), s);
+export const deleteScene = (id: string) => deleteDoc(doc(db(), 'draft', 'content', 'scenes', id));
+export const saveItem = (it: Item) => setDoc(doc(db(), 'draft', 'content', 'items', it.id), it);
+export const deleteItem = (id: string) => deleteDoc(doc(db(), 'draft', 'content', 'items', id));
+export const saveBehaviour = (b: LLMBehaviour) =>
+	setDoc(doc(db(), 'draft', 'content', 'behaviours', b.id), b);
+export const deleteBehaviour = (id: string) =>
+	deleteDoc(doc(db(), 'draft', 'content', 'behaviours', id));
+
+/** Replace the whole draft with a build's content (e.g. seed from placeholder). */
+export async function seedDraftFromBuild(build: Build): Promise<void> {
+	const batch = writeBatch(db());
+	batch.set(rootDoc(), { startSceneId: build.meta.startSceneId });
+	for (const s of build.scenes) batch.set(doc(db(), 'draft', 'content', 'scenes', s.id), s);
+	for (const it of build.items) batch.set(doc(db(), 'draft', 'content', 'items', it.id), it);
+	for (const b of build.behaviours) batch.set(doc(db(), 'draft', 'content', 'behaviours', b.id), b);
+	await batch.commit();
+}

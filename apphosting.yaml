@@ -20,7 +20,7 @@ env:
       - RUNTIME
 
   - variable: EDITOR_ALLOWED_EMAILS
-    value: ''
+    value: 'francisco@incomputable.io'
     availability:
       - RUNTIME
 

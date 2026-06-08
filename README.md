@@ -22,9 +22,17 @@ Two apps share one content model in a single SvelteKit project:
   _Remaining acceptance: verify on the actual Raspberry Pi in kiosk mode (hardware needed)._
 - **M2 — LLM loop** ✓ `POST /api/converse` + `src/lib/llm/*` (prompt, zod-validated structured
   output, deterministic outcome resolution, backend-agnostic Gemini wrapper) and a keyboard
-  dialogue panel in `/play`. Runs the deterministic fallback until a Gemini key is configured.
-  _Remaining acceptance: live-model end-to-end (needs a key)._
-- M3 Firestore content + publish · M4 editor · M5 polish — not started.
+  dialogue panel in `/play`. Live model verified; deterministic fallback when no key is configured.
+- **M3 — Firestore content + publish** ✓ `src/lib/content/*` (zod schemas, `assembleBuild` with
+  referential-integrity validation, client-SDK `loader` with placeholder fallback, Admin-SDK
+  atomic `publish`/`rollback`). `/play` loads the active build, falling back to the placeholder
+  when nothing is published. _Remaining acceptance: live publish round-trip (needs ADC / deploy)._
+- **M4 — editor** (in progress) — client-only `/editor` (`ssr=false`) gated by Firebase
+  Email/Password auth + the allowlist. Dashboard does seed-from-placeholder → **client-side atomic
+  publish** → rollback (`src/lib/content/{draft,publishClient}.ts`). _TODO: scene/item/behaviour
+  editors, Svelte Flow graph, image upload, behaviour test panel._ Sign in at `/editor` as an
+  allowlisted user to exercise.
+- M5 polish — not started.
 
 ## Develop
 
