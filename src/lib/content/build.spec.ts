@@ -59,6 +59,14 @@ describe('assembleBuild', () => {
 		expect(assembleBuild(bad, 1, 'now').errors.join(' ')).toContain('ghostItem');
 	});
 
+	it('flags a giveable item referencing an unknown item', () => {
+		const bad: DraftContent = {
+			...validDraft,
+			scenes: [scene({ giveableItems: [{ itemId: 'ghostItem', chance: 0.5 }] }), scene({ id: 'b' })]
+		};
+		expect(assembleBuild(bad, 1, 'now').errors.join(' ')).toContain('ghostItem');
+	});
+
 	it('rejects schema-invalid content', () => {
 		const bad = {
 			...validDraft,

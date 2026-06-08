@@ -73,6 +73,14 @@ describe('withSyntheticOutcomes', () => {
 		expect(isSyntheticOutcomeId('exit:hall')).toBe(true);
 		expect(isSyntheticOutcomeId('grant')).toBe(false);
 	});
+
+	it('adds one granted addItem outcome per giveable item', () => {
+		const aug = withSyntheticOutcomes(behaviour, [], [{ label: 'Pass card', itemId: 'pass-card' }]);
+		const grant = findOutcome(aug, 'grant:pass-card');
+		expect(grant?.granted).toBe(true);
+		expect(grant?.effects).toEqual([{ type: 'addItem', itemId: 'pass-card' }]);
+		expect(isSyntheticOutcomeId('grant:pass-card')).toBe(true);
+	});
 });
 
 describe('resolveEffects', () => {

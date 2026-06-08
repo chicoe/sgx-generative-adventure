@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import EffectsEditor from '$lib/components/editor/EffectsEditor.svelte';
 	import { loadDraft, saveBehaviour, deleteBehaviour } from '$lib/content/draft';
+	import { draftStatus } from '$lib/content/draftStatus.svelte';
 	import type { ConversationTurn, LLMBehaviour } from '$lib/engine/types';
 
 	let behaviours = $state<LLMBehaviour[]>([]);
@@ -10,6 +11,12 @@
 	let current = $state<LLMBehaviour | null>(null);
 	let busy = $state(false);
 	let message = $state('');
+
+	// The outcomes panel (allowed outcomes + granted/denied effects) is hidden for
+	// now to keep the client's editor simple — access/knowledge is modelled as
+	// items instead. The data is still loaded/saved untouched; flip this back on to
+	// re-expose the panel later.
+	const SHOW_OUTCOMES = false;
 
 	async function refresh() {
 		const d = await loadDraft();
@@ -53,6 +60,7 @@
 		message = '';
 		try {
 			await saveBehaviour(toSave);
+			draftStatus.markDirty();
 			message = `Saved "${id}".`;
 			await refresh();
 		} catch (e) {
@@ -67,6 +75,7 @@
 		busy = true;
 		try {
 			await deleteBehaviour(current.id);
+			draftStatus.markDirty();
 			current = null;
 			await refresh();
 			message = 'Deleted.';
@@ -131,10 +140,12 @@
 </script>
 
 <h1>Behaviours</h1>
-<p class="note">
-	⚠ Placeholder content. The test panel runs the live model against the behaviour you're editing
-	(unpublished).
-</p>
+{#if !behaviours.length}
+	<p class="note">
+		⚠ Placeholder content. The test panel runs the live model against the behaviour you're editing
+		(unpublished).
+	</p>
+{/if}
 {#if message}<p class="msg">{message}</p>{/if}
 
 <div class="toolbar">
@@ -158,11 +169,11 @@
 			<label>name <input bind:value={current.name} /></label>
 			<label
 				>system prompt (computer persona)
-				<textarea rows="3" bind:value={current.systemPrompt}></textarea>
+				<textarea rows="5" bind:value={current.systemPrompt}></textarea>
 			</label>
 			<label
 				>goal (what the player is trying to achieve)
-				<textarea rows="2" bind:value={current.goal}></textarea>
+				<textarea rows="3" bind:value={current.goal}></textarea>
 			</label>
 
 			<fieldset>
@@ -181,41 +192,43 @@
 				<input type="number" min="1" bind:value={current.maxTurns} />
 			</label>
 
-			<fieldset>
-				<legend>allowed outcomes (the model picks exactly one)</legend>
-				{#each current.allowedOutcomes as _o, k (k)}
-					<div class="outcome">
-						<div class="rowline">
-							<input class="oid" placeholder="id" bind:value={current.allowedOutcomes[k].id} />
-							<input placeholder="label" bind:value={current.allowedOutcomes[k].label} />
-							<label class="chk">
-								<input type="checkbox" bind:checked={current.allowedOutcomes[k].granted} /> granted
-							</label>
-							<button type="button" class="x" onclick={() => removeOutcome(k)}>✕</button>
+			{#if SHOW_OUTCOMES}
+				<fieldset>
+					<legend>allowed outcomes (the model picks exactly one)</legend>
+					{#each current.allowedOutcomes as _o, k (k)}
+						<div class="outcome">
+							<div class="rowline">
+								<input class="oid" placeholder="id" bind:value={current.allowedOutcomes[k].id} />
+								<input placeholder="label" bind:value={current.allowedOutcomes[k].label} />
+								<label class="chk">
+									<input type="checkbox" bind:checked={current.allowedOutcomes[k].granted} /> granted
+								</label>
+								<button type="button" class="x" onclick={() => removeOutcome(k)}>✕</button>
+							</div>
+							<EffectsEditor
+								bind:effects={current.allowedOutcomes[k].effects}
+								{itemIds}
+								{sceneIds}
+								label="outcome effects"
+							/>
 						</div>
-						<EffectsEditor
-							bind:effects={current.allowedOutcomes[k].effects}
-							{itemIds}
-							{sceneIds}
-							label="outcome effects"
-						/>
-					</div>
-				{/each}
-				<button type="button" class="add" onclick={addOutcome}>+ outcome</button>
-			</fieldset>
+					{/each}
+					<button type="button" class="add" onclick={addOutcome}>+ outcome</button>
+				</fieldset>
 
-			<EffectsEditor
-				bind:effects={current.onGrantedEffects}
-				{itemIds}
-				{sceneIds}
-				label="on granted (any granted outcome)"
-			/>
-			<EffectsEditor
-				bind:effects={current.onDeniedEffects!}
-				{itemIds}
-				{sceneIds}
-				label="on denied"
-			/>
+				<EffectsEditor
+					bind:effects={current.onGrantedEffects}
+					{itemIds}
+					{sceneIds}
+					label="on granted (any granted outcome)"
+				/>
+				<EffectsEditor
+					bind:effects={current.onDeniedEffects!}
+					{itemIds}
+					{sceneIds}
+					label="on denied"
+				/>
+			{/if}
 
 			<div class="actions">
 				<button type="button" class="primary" onclick={save} disabled={busy}>Save</button>
@@ -318,6 +331,11 @@
 	}
 	textarea {
 		resize: vertical;
+		/* Grow to fit content (supported browsers), floor at a few lines, cap at
+		   30% of the viewport then scroll. */
+		field-sizing: content;
+		min-height: 4.5rem;
+		max-height: 30vh;
 	}
 	fieldset {
 		border: 1px solid var(--line);

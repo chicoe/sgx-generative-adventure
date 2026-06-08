@@ -10,6 +10,7 @@
 		type BuildSummary
 	} from '$lib/content/publishClient';
 	import { placeholderBuild } from '$lib/game/placeholderBuild';
+	import { draftStatus } from '$lib/content/draftStatus.svelte';
 	import type { DraftContent } from '$lib/content/build';
 
 	let draft = $state<DraftContent | null>(null);
@@ -19,12 +20,19 @@
 	let message = $state('');
 	let errors = $state<string[]>([]);
 
+	// Once the client has authored real content, the placeholder-seeding affordances
+	// are hidden so they don't get confused into wiping their work.
+	const hasContent = $derived(
+		!!draft && draft.scenes.length + draft.items.length + draft.behaviours.length > 0
+	);
+
 	async function refresh() {
 		[draft, builds, activeBuildId] = await Promise.all([
 			loadDraft(),
 			listBuilds(),
 			getActiveBuildId()
 		]);
+		await draftStatus.check();
 	}
 
 	onMount(() => {
@@ -70,10 +78,13 @@
 </script>
 
 <h1>Dashboard</h1>
-<p class="note">
-	⚠ Placeholder content. Build your game in <strong>Graph</strong> / <strong>Scenes</strong> /
-	<strong>Items</strong> / <strong>Behaviours</strong>, set the ship computer below, then publish.
-</p>
+{#if !hasContent}
+	<p class="note">
+		⚠ Placeholder content. Seed from the placeholder build to explore, or start your own in
+		<strong>Graph</strong> / <strong>Scenes</strong> / <strong>Items</strong> /
+		<strong>Behaviours</strong>, then publish.
+	</p>
+{/if}
 
 {#if message}<p class="ok">{message}</p>{/if}
 {#if errors.length}
@@ -106,8 +117,13 @@
 	{:else}
 		<p class="muted">No draft yet.</p>
 	{/if}
+	{#if draftStatus.dirty}
+		<p class="dirty-note">● Unpublished changes — Validate &amp; publish to push them live.</p>
+	{/if}
 	<div class="row">
-		<button type="button" onclick={seed} disabled={busy}>Seed draft from placeholder</button>
+		{#if !hasContent}
+			<button type="button" onclick={seed} disabled={busy}>Seed draft from placeholder</button>
+		{/if}
 		<button type="button" class="primary" onclick={publish} disabled={busy}
 			>Validate &amp; publish</button
 		>
@@ -133,7 +149,11 @@
 			{/each}
 		</ul>
 	{:else}
-		<p class="muted">Nothing published yet. Seed a draft, then publish.</p>
+		<p class="muted">
+			Nothing published yet — {hasContent
+				? 'Validate & publish to go live.'
+				: 'seed a draft, then publish.'}
+		</p>
 	{/if}
 	<p><a href={resolve('/play')}>▶ Open the game</a> to see the active build.</p>
 </section>
@@ -159,6 +179,10 @@
 	}
 	.ok {
 		color: #9fc0a8;
+	}
+	.dirty-note {
+		color: #ff5a4a;
+		font-size: 0.85rem;
 	}
 	.muted {
 		color: var(--ink-dim);

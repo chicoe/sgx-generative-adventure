@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { loadDraft, saveItem, deleteItem } from '$lib/content/draft';
+	import { draftStatus } from '$lib/content/draftStatus.svelte';
 	import type { Item } from '$lib/engine/types';
 
 	let items = $state<Item[]>([]);
@@ -18,6 +19,7 @@
 		message = '';
 		try {
 			await saveItem(item);
+			draftStatus.markDirty();
 			message = `Saved "${item.id}".`;
 		} catch (e) {
 			message = e instanceof Error ? e.message : String(e);
@@ -30,6 +32,7 @@
 		busy = true;
 		try {
 			await deleteItem(id);
+			draftStatus.markDirty();
 			await refresh();
 			message = `Deleted "${id}".`;
 		} catch (e) {
@@ -50,9 +53,11 @@
 </script>
 
 <h1>Items</h1>
-<p class="note">
-	⚠ Placeholder content. Icon upload (Storage) comes later — `iconPath` is a path/URL for now.
-</p>
+{#if !items.length}
+	<p class="note">
+		⚠ Placeholder content. Icon upload (Storage) comes later — `iconPath` is a path/URL for now.
+	</p>
+{/if}
 {#if message}<p class="msg">{message}</p>{/if}
 
 <div class="list">

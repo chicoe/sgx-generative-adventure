@@ -16,17 +16,23 @@ export interface SceneContext {
 	prompt?: string; // author's scene description + instructions for the computer
 	exits?: { label: string; toSceneId: string }[];
 	inventory?: string[];
+	giveable?: { label: string; itemId: string }[]; // items the computer may hand over here
 }
 
 function sceneSection(scene: SceneContext): string {
 	const exits = scene.exits?.length
 		? scene.exits.map((e) => `- ${e.label} (leads to scene "${e.toSceneId}")`).join('\n')
 		: '- (none)';
+	const giveable = scene.giveable?.length
+		? scene.giveable.map((g) => `- ${g.label} (item "${g.itemId}")`).join('\n')
+		: '- (none)';
 	return [
 		`CURRENT SCENE: ${scene.name ?? '(unnamed)'}`,
 		scene.prompt ? `SCENE NOTES: ${scene.prompt}` : '',
 		'AVAILABLE EXITS:',
 		exits,
+		'ITEMS YOU MAY GIVE (only here, only if the player earns or convinces you):',
+		giveable,
 		`PLAYER INVENTORY: ${scene.inventory?.length ? scene.inventory.join(', ') : '(empty)'}`
 	]
 		.filter(Boolean)
@@ -65,6 +71,12 @@ export function buildPrompt(
 		'- You may ONLY move the player through the exits listed under AVAILABLE EXITS. Never mention,',
 		'  offer, or imply you can go anywhere that is not in that list. If the player asks for a place',
 		'  that is not an available exit, say in character that there is no route there.',
+		'- If SCENE NOTES say an exit or action requires an item (e.g. a key, a lever, a password), only',
+		'  allow it when that item is listed in PLAYER INVENTORY; otherwise stay in character and explain',
+		'  what is needed. Do not pretend the player has something they do not.',
+		'- You may hand the player an item ONLY if it appears under ITEMS YOU MAY GIVE and they have',
+		'  genuinely earned it or made a convincing case. Choose the matching grant outcome to actually',
+		'  give it; never claim to give anything that is not on that list.',
 		'- Most turns are ordinary conversation: when no listed action or exit clearly applies, pick the',
 		'  "no change" outcome and simply reply. Only pick an action or exit outcome when the player',
 		'  clearly intends it.',

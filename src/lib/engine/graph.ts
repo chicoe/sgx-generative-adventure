@@ -35,3 +35,12 @@ export function availableHotspots(scene: Scene, state: GameState): Hotspot[] {
 export function findScene(scenes: Scene[], sceneId: string): Scene | undefined {
 	return scenes.find((scene) => scene.id === sceneId);
 }
+
+/**
+ * Roll which of a scene's giveable items are present this visit. Each item is
+ * included with probability `chance` (0..1). Pure; `rng` is injectable so tests
+ * can make the roll deterministic.
+ */
+export function rollGiveableItems(scene: Scene, rng: () => number = Math.random): string[] {
+	return (scene.giveableItems ?? []).filter((g) => rng() < g.chance).map((g) => g.itemId);
+}

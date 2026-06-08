@@ -1,9 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { availableExits, availableHotspots, evaluate, findScene } from './graph';
+import { availableExits, availableHotspots, evaluate, findScene, rollGiveableItems } from './graph';
 import { createGameState } from './state';
 import { applyEffects } from './effects';
 import { testBuild } from './fixtures';
-import type { Condition, GameState } from './types';
+import type { Condition, GameState, Scene } from './types';
 
 const stateWith = (mut: (s: GameState) => GameState): GameState => mut(createGameState('bridge'));
 
@@ -73,5 +73,38 @@ describe('availability helpers', () => {
 describe('findScene', () => {
 	it('returns undefined for unknown ids', () => {
 		expect(findScene(testBuild.scenes, 'nope')).toBeUndefined();
+	});
+});
+
+describe('rollGiveableItems', () => {
+	const scene = (giveableItems: Scene['giveableItems']): Scene => ({
+		id: 's',
+		name: 'S',
+		layers: [],
+		hotspots: [],
+		exits: [],
+		giveableItems
+	});
+
+	it('includes an item only when the rng draw is below its chance', () => {
+		const s = scene([
+			{ itemId: 'a', chance: 0.5 },
+			{ itemId: 'b', chance: 0.5 }
+		]);
+		const draws = [0.4, 0.6]; // a: 0.4 < 0.5 ✓, b: 0.6 < 0.5 ✗
+		let i = 0;
+		expect(rollGiveableItems(s, () => draws[i++])).toEqual(['a']);
+	});
+
+	it('chance 1 is always present, chance 0 never', () => {
+		const s = scene([
+			{ itemId: 'always', chance: 1 },
+			{ itemId: 'never', chance: 0 }
+		]);
+		expect(rollGiveableItems(s, () => 0.99)).toEqual(['always']);
+	});
+
+	it('returns empty for a scene with no giveable items', () => {
+		expect(rollGiveableItems(scene(undefined))).toEqual([]);
 	});
 });

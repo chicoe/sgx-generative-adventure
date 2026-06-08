@@ -30,6 +30,7 @@ export function resolveEffects(behaviour: LLMBehaviour, outcome: Outcome): Effec
 }
 
 const EXIT_OUTCOME_PREFIX = 'exit:';
+const GRANT_OUTCOME_PREFIX = 'grant:';
 export const NEUTRAL_OUTCOME_ID = '__none__';
 
 /** True for a synthesized "take the player through an exit" outcome. */
@@ -37,22 +38,29 @@ export function isExitOutcomeId(id: string): boolean {
 	return id.startsWith(EXIT_OUTCOME_PREFIX);
 }
 
-/** Synthesized outcomes (neutral + exits) never carry behaviour-level effects. */
+/** True for a synthesized "give the player an item" outcome. */
+export function isGrantOutcomeId(id: string): boolean {
+	return id.startsWith(GRANT_OUTCOME_PREFIX);
+}
+
+/** Synthesized outcomes (neutral + exits + grants) never carry behaviour-level effects. */
 export function isSyntheticOutcomeId(id: string): boolean {
-	return id === NEUTRAL_OUTCOME_ID || isExitOutcomeId(id);
+	return id === NEUTRAL_OUTCOME_ID || isExitOutcomeId(id) || isGrantOutcomeId(id);
 }
 
 /**
  * Augment a behaviour with synthesized outcomes the model can always pick:
  *  - a NEUTRAL "no change, just reply" outcome, so ordinary conversation doesn't
- *    fire the behaviour's authored effects, and
- *  - one granted outcome per available exit, so it can move the player.
- * Exit targets come from the scene's real exits — never invented by the model —
- * keeping transitions deterministic.
+ *    fire the behaviour's authored effects,
+ *  - one granted outcome per available exit, so it can move the player, and
+ *  - one granted outcome per item the scene lets the computer give (addItem).
+ * Exit targets and grantable items come from the scene — never invented by the
+ * model — keeping transitions and rewards deterministic.
  */
 export function withSyntheticOutcomes(
 	behaviour: LLMBehaviour,
-	exits: { label: string; toSceneId: string }[] = []
+	exits: { label: string; toSceneId: string }[] = [],
+	grantables: { label: string; itemId: string }[] = []
 ): LLMBehaviour {
 	const ids = new Set(behaviour.allowedOutcomes.map((o) => o.id));
 	const extra: Outcome[] = [];
@@ -74,6 +82,17 @@ export function withSyntheticOutcomes(
 			label: `Take the player to "${e.label}" (scene ${e.toSceneId})`,
 			granted: true,
 			effects: [{ type: 'goToScene', sceneId: e.toSceneId }]
+		});
+	}
+	for (const g of grantables) {
+		const id = `${GRANT_OUTCOME_PREFIX}${g.itemId}`;
+		if (ids.has(id)) continue;
+		ids.add(id);
+		extra.push({
+			id,
+			label: `Give the player "${g.label}" (item ${g.itemId}) — only if they earn or convince you`,
+			granted: true,
+			effects: [{ type: 'addItem', itemId: g.itemId }]
 		});
 	}
 	return { ...behaviour, allowedOutcomes: [...behaviour.allowedOutcomes, ...extra] };

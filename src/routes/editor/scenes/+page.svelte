@@ -3,6 +3,7 @@
 	import { page } from '$app/state';
 	import EffectsEditor from '$lib/components/editor/EffectsEditor.svelte';
 	import { loadDraft, saveScene, deleteScene } from '$lib/content/draft';
+	import { draftStatus } from '$lib/content/draftStatus.svelte';
 	import { uploadImage } from '$lib/firebase/storage';
 	import type { Scene } from '$lib/engine/types';
 
@@ -13,6 +14,10 @@
 	let busy = $state(false);
 	let uploading = $state(false);
 	let message = $state('');
+
+	// The filter/CSS-grade panel is hidden for now to keep the client's editor
+	// simple. The data is still loaded/saved untouched; flip back on to re-expose.
+	const SHOW_FILTER = false;
 
 	const sceneIds = $derived(scenes.map((s) => s.id));
 	const imgUrl = (p: string) =>
@@ -55,6 +60,7 @@
 		message = '';
 		try {
 			await saveScene({ ...current, id });
+			draftStatus.markDirty();
 			message = `Saved "${id}".`;
 			await refresh();
 		} catch (e) {
@@ -68,6 +74,7 @@
 		busy = true;
 		try {
 			await deleteScene(current.id);
+			draftStatus.markDirty();
 			current = null;
 			await refresh();
 			message = 'Deleted.';
@@ -104,12 +111,28 @@
 			uploading = false;
 		}
 	}
+
+	// giveable items (the computer may grant these here, rolled per run)
+	const addGiveable = () =>
+		current &&
+		(current.giveableItems = [
+			...(current.giveableItems ?? []),
+			{ itemId: itemIds[0] ?? '', chance: 0.5 }
+		]);
+	const removeGiveable = (i: number) =>
+		current && (current.giveableItems = (current.giveableItems ?? []).filter((_, j) => j !== i));
+	function setGiveableChance(i: number, pct: number) {
+		if (!current?.giveableItems) return;
+		current.giveableItems[i].chance = Math.max(0, Math.min(100, pct || 0)) / 100;
+	}
 </script>
 
 <h1>Scenes</h1>
-<p class="note">
-	⚠ Placeholder content. Upload art per layer; the game reads it from the published build.
-</p>
+{#if !scenes.length}
+	<p class="note">
+		⚠ Placeholder content. Upload art per layer; the game reads it from the published build.
+	</p>
+{/if}
 {#if message}<p class="msg">{message}</p>{/if}
 
 <div class="toolbar">
@@ -155,26 +178,31 @@
 			>
 		</div>
 
-		<fieldset>
-			<legend>filter / CSS grade (optional)</legend>
-			<label
-				>css <input
-					bind:value={current.filter!.css}
-					placeholder="contrast(1.05) saturate(0.9)"
-				/></label
-			>
-			<div class="grid2">
+		{#if SHOW_FILTER}
+			<fieldset>
+				<legend>filter / CSS grade (optional)</legend>
 				<label
-					>blendMode <input bind:value={current.filter!.blendMode} placeholder="multiply" /></label
-				>
-				<label
-					>overlay <input
-						bind:value={current.filter!.overlay}
-						placeholder="repeating-linear-gradient(...)"
+					>css <input
+						bind:value={current.filter!.css}
+						placeholder="contrast(1.05) saturate(0.9)"
 					/></label
 				>
-			</div>
-		</fieldset>
+				<div class="grid2">
+					<label
+						>blendMode <input
+							bind:value={current.filter!.blendMode}
+							placeholder="multiply"
+						/></label
+					>
+					<label
+						>overlay <input
+							bind:value={current.filter!.overlay}
+							placeholder="repeating-linear-gradient(...)"
+						/></label
+					>
+				</div>
+			</fieldset>
+		{/if}
 
 		<fieldset>
 			<legend>layers (back → front by z)</legend>
@@ -212,10 +240,36 @@
 			{#if uploading}<span class="muted"> uploading…</span>{/if}
 		</fieldset>
 
-		<p class="exits-note">
-			Exits are managed on the <strong>Graph</strong> — connect scenes there ({current.exits.length}
-			exit{current.exits.length === 1 ? '' : 's'} from this scene).
-		</p>
+		<fieldset>
+			<legend
+				>giveable items (the computer may hand these out here — presence rolled per run)</legend
+			>
+			{#each current.giveableItems ?? [] as _gi, i (i)}
+				<div class="rowline">
+					<select bind:value={current.giveableItems![i].itemId}>
+						<option value="" disabled>— item —</option>
+						{#each itemIds as id (id)}<option value={id}>{id}</option>{/each}
+					</select>
+					<label class="num"
+						>chance
+						<input
+							type="number"
+							min="0"
+							max="100"
+							step="5"
+							value={Math.round(current.giveableItems![i].chance * 100)}
+							oninput={(e) => setGiveableChance(i, e.currentTarget.valueAsNumber)}
+						/>
+						%
+					</label>
+					<button type="button" class="x" onclick={() => removeGiveable(i)}>✕</button>
+				</div>
+			{/each}
+			<button type="button" class="add" onclick={addGiveable} disabled={!itemIds.length}
+				>+ giveable item</button
+			>
+			{#if !itemIds.length}<span class="muted"> create items first</span>{/if}
+		</fieldset>
 
 		<EffectsEditor
 			bind:effects={current.onEnter!}
@@ -247,12 +301,6 @@
 	.msg {
 		color: var(--accent);
 	}
-	.exits-note {
-		font-size: 0.8rem;
-		color: var(--ink-dim);
-		border: 1px solid var(--line);
-		padding: 0.4rem 0.7rem;
-	}
 	.muted {
 		color: var(--ink-dim);
 	}
@@ -264,8 +312,13 @@
 	}
 	.chk {
 		display: flex;
+		flex-direction: row;
 		align-items: center;
 		gap: 0.4rem;
+	}
+	.roles .chk input {
+		flex: none;
+		width: auto;
 	}
 	.toolbar {
 		display: flex;

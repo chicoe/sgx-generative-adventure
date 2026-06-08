@@ -92,6 +92,8 @@ function validateReferences(draft: DraftContent): string[] {
 		}
 		for (const id of effectSceneIds(scene.onEnter)) sceneRef(id, `scene "${scene.id}" onEnter`);
 		for (const id of effectItemIds(scene.onEnter)) itemRef(id, `scene "${scene.id}" onEnter`);
+		for (const g of scene.giveableItems ?? [])
+			itemRef(g.itemId, `scene "${scene.id}" giveable item`);
 	}
 
 	for (const b of draft.behaviours) {

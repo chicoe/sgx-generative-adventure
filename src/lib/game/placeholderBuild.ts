@@ -46,6 +46,8 @@ export const placeholderBuild: Build = {
 			introText: '[ placeholder intro text for Scene A — replace via editor ]',
 			prompt:
 				'[ placeholder scene prompt for Scene A — describe the location and tell the computer how to behave here; the LLM also sees the exits and the player inventory ]',
+			// Demonstrates the giveable-items capability (rolled per run); placeholder item.
+			giveableItems: [{ itemId: 'placeholder-item', chance: 0.8 }],
 			// Demonstrates the FilterSpec capability; not a final art grade.
 			filter: { css: 'contrast(1.03) brightness(1.01)' },
 			layers: [

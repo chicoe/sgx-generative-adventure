@@ -43,7 +43,8 @@ const requestSchema = z.object({
 			name: z.string().optional(),
 			prompt: z.string().optional(),
 			exits: z.array(z.object({ label: z.string(), toSceneId: z.string() })).optional(),
-			inventory: z.array(z.string()).optional()
+			inventory: z.array(z.string()).optional(),
+			giveable: z.array(z.object({ label: z.string(), itemId: z.string() })).optional()
 		})
 		.optional()
 });
@@ -74,8 +75,13 @@ export const POST: RequestHandler = async ({ request }) => {
 	if (!body.opening && !body.playerMessage) error(400, 'playerMessage required');
 
 	// Augment with synthesized outcomes: a neutral "just reply" option + one per
-	// available exit (targets come from the scene, not the model).
-	const behaviour = withSyntheticOutcomes(await resolveBehaviour(body), body.sceneContext?.exits);
+	// available exit + one per giveable item (targets/items come from the scene,
+	// not the model).
+	const behaviour = withSyntheticOutcomes(
+		await resolveBehaviour(body),
+		body.sceneContext?.exits,
+		body.sceneContext?.giveable
+	);
 	const history = body.history as ConversationTurn[];
 
 	let reply = FALLBACK_REPLY;

@@ -57,6 +57,11 @@ export const exitSchema = z.object({
 	condition: conditionSchema.optional()
 });
 
+export const giveableItemSchema = z.object({
+	itemId: z.string().min(1),
+	chance: z.number().min(0).max(1)
+});
+
 export const sceneSchema = z.object({
 	id: z.string().min(1),
 	name: z.string(),
@@ -67,6 +72,7 @@ export const sceneSchema = z.object({
 	onEnter: z.array(effectSchema).optional(),
 	introText: z.string().optional(),
 	prompt: z.string().optional(),
+	giveableItems: z.array(giveableItemSchema).optional(),
 	start: z.boolean().optional(),
 	ending: z.boolean().optional()
 });

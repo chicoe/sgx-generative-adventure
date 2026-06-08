@@ -4,10 +4,10 @@
 	import SceneRenderer from '$lib/components/SceneRenderer.svelte';
 	import { placeholderBuild } from '$lib/game/placeholderBuild';
 	import { startGame } from '$lib/engine/state';
-	import { availableExits, findScene } from '$lib/engine/graph';
+	import { availableExits, findScene, rollGiveableItems } from '$lib/engine/graph';
 	import { applyEffects } from '$lib/engine/effects';
 	import { loadActiveBuild } from '$lib/content/loader';
-	import type { Build, ConversationTurn, Effect, GameState, Scene } from '$lib/engine/types';
+	import type { Build, ConversationTurn, Effect, GameState, Item, Scene } from '$lib/engine/types';
 
 	const clamp = (n: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, n));
 	function autofocus(node: HTMLInputElement) {
@@ -87,12 +87,29 @@
 	// conversation's history for the LLM.
 	let activeBehaviourId = $state<string | undefined>(undefined);
 	let convo = $state<ConversationTurn[]>([]);
+	// Rolling window of the recent transcript sent to the computer so it remembers
+	// the interaction across turns AND scenes (≈20 player↔computer exchanges).
+	const MAX_HISTORY_TURNS = 40;
 
 	const scene = $derived(findScene(build.scenes, game.currentSceneId)!);
 
 	// A scene with no usable layer art shows a "no signal" static screen (the
 	// client hasn't supplied art for it yet).
 	const sceneHasArt = (s: Scene) => s.layers.some((l) => l.imagePath?.trim());
+
+	// Items the computer may give in the current scene THIS run (rolled on entry).
+	let presentGiveables = $state<string[]>([]);
+
+	// Left-hand inventory HUD: the player's items (first 9, mapped to keys 1–9).
+	const itemName = (id: string) => build.items.find((i) => i.id === id)?.name ?? id;
+	const imgUrl = (p: string) =>
+		!p ? '' : /^(https?:)?\/\//.test(p) || p.startsWith('/') ? p : `/${p}`;
+	const inventoryItems = $derived(
+		game.inventory
+			.map((id) => build.items.find((i) => i.id === id))
+			.filter((i): i is Item => !!i)
+			.slice(0, 9)
+	);
 
 	function push(who: Line['who'], text?: string | null) {
 		if (!text) return;
@@ -126,11 +143,16 @@
 		return b.meta.defaultBehaviourId ?? b.behaviours[0]?.id;
 	}
 	function sceneContextFor(s: Scene, state: GameState) {
+		const owned = new Set(state.inventory);
 		return {
 			name: s.name,
 			prompt: s.prompt,
 			exits: availableExits(s, state).map((x) => ({ label: x.label, toSceneId: x.toSceneId })),
-			inventory: state.inventory
+			inventory: state.inventory,
+			// Only offer items present this run that the player doesn't already hold.
+			giveable: presentGiveables
+				.filter((id) => !owned.has(id))
+				.map((id) => ({ itemId: id, label: itemName(id) }))
 		};
 	}
 
@@ -138,9 +160,9 @@
 	// so it is safe during SSR/init; callers trigger the opening greeting).
 	function enterScene(b: Build, state: GameState, narration: string[]) {
 		const s = findScene(b.scenes, state.currentSceneId);
+		presentGiveables = s ? rollGiveableItems(s) : [];
 		for (const t of narration) push('narration', t);
 		push('narration', s?.introText);
-		convo = [];
 		activeBehaviourId = shipComputer(b);
 	}
 
@@ -148,6 +170,7 @@
 		const started = startGame(b);
 		game = started.state;
 		lines = [];
+		convo = []; // a fresh run starts the computer's memory clean
 		vitalsStartedAt = Date.now(); // a fresh run starts at full(ish) vitals
 		enterScene(b, started.state, started.messages);
 	}
@@ -168,7 +191,7 @@
 				body: JSON.stringify({
 					behaviourId: behaviour.id,
 					opening: true,
-					history: [],
+					history: convo.slice(-MAX_HISTORY_TURNS),
 					sceneContext: sceneContextFor(scene, game)
 				})
 			});
@@ -241,7 +264,7 @@
 				body: JSON.stringify({
 					behaviourId: behaviour.id,
 					playerMessage: text,
-					history: prior,
+					history: prior.slice(-MAX_HISTORY_TURNS),
 					sceneContext: sceneContextFor(scene, game)
 				})
 			});
@@ -265,6 +288,25 @@
 			push('system', '[ connection lost — try again ]');
 		} finally {
 			pending = false;
+		}
+	}
+
+	// Inventory HUD: "use" an item by sending a plain message the computer reads.
+	function useItem(item: Item) {
+		if (pending) return;
+		inputText = `use the ${item.name}`;
+		sendMessage();
+	}
+	// Number keys 1–9 use the matching slot — but only when the player hasn't
+	// started typing, so normal messages (which may contain digits) aren't hijacked.
+	function onComposerKey(e: KeyboardEvent) {
+		if (pending || inputText.length > 0) return;
+		if (e.key >= '1' && e.key <= '9') {
+			const item = inventoryItems[Number(e.key) - 1];
+			if (item) {
+				e.preventDefault();
+				useItem(item);
+			}
 		}
 	}
 
@@ -392,6 +434,30 @@
 			{/key}
 		</div>
 
+		<aside class="inventory" aria-label="inventory">
+			{#each Array.from({ length: 9 }) as _slot, idx (idx)}
+				{@const item = inventoryItems[idx]}
+				<button
+					type="button"
+					class="slot"
+					class:filled={!!item}
+					tabindex="-1"
+					disabled={!item || pending}
+					onclick={() => item && useItem(item)}
+					title={item ? `Use ${item.name} (press ${idx + 1})` : `slot ${idx + 1}`}
+				>
+					<span class="key">{idx + 1}</span>
+					{#if item}
+						{#if imgUrl(item.iconPath)}
+							<img src={imgUrl(item.iconPath)} alt={item.name} />
+						{:else}
+							<span class="nm">{item.name}</span>
+						{/if}
+					{/if}
+				</button>
+			{/each}
+		</aside>
+
 		<section class="terminal">
 			<div class="transcript" bind:this={transcriptEl}>
 				{#each lines as line (line.id)}
@@ -417,6 +483,7 @@
 					use:autofocus
 					placeholder={atEnding ? 'type anything to play again…' : 'type to the computer…'}
 					bind:value={inputText}
+					onkeydown={onComposerKey}
 					disabled={pending}
 				/>
 			</form>
@@ -675,6 +742,68 @@
 		font-size: 0.68rem;
 		letter-spacing: 0.08em;
 		color: #d8a23a;
+	}
+
+	/* Left-hand inventory HUD: 3×3 slots mapped to number keys 1–9. */
+	.inventory {
+		position: absolute;
+		left: 1.2rem;
+		top: 4.4rem;
+		z-index: 80;
+		display: grid;
+		grid-template-columns: repeat(3, 3.1rem);
+		grid-auto-rows: 3.1rem;
+		gap: 0.35rem;
+		padding: 0.45rem;
+		background: rgba(10, 8, 5, 0.6);
+		border: 1px solid var(--line);
+		box-shadow: 0 0 18px rgba(255, 176, 0, 0.05);
+		backdrop-filter: blur(2px);
+	}
+	.slot {
+		position: relative;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		padding: 0.15rem;
+		font: inherit;
+		color: var(--ink-dim);
+		background: rgba(20, 15, 8, 0.45);
+		border: 1px solid var(--line);
+		overflow: hidden;
+	}
+	.slot.filled {
+		color: var(--ink);
+		border-color: var(--ink-dim);
+		box-shadow: 0 0 8px rgba(255, 176, 0, 0.12) inset;
+		cursor: pointer;
+	}
+	.slot.filled:hover:not(:disabled) {
+		border-color: var(--accent);
+		color: var(--accent);
+	}
+	.slot:disabled {
+		cursor: default;
+	}
+	.slot .key {
+		position: absolute;
+		top: 1px;
+		left: 3px;
+		font-size: 0.58rem;
+		color: var(--ink-dim);
+	}
+	.slot img {
+		max-width: 100%;
+		max-height: 100%;
+		object-fit: contain;
+	}
+	.slot .nm {
+		font-family: var(--font-terminal);
+		font-size: 0.5rem;
+		line-height: 1.05;
+		text-align: center;
+		padding: 0.35rem 0.1rem 0.1rem;
+		word-break: break-word;
 	}
 
 	/* Translucent overlay docked at the bottom, floating over the scene. */

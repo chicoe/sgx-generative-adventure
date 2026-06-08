@@ -1,11 +1,22 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { resolve } from '$app/paths';
+	import { afterNavigate } from '$app/navigation';
 	import { authStore, initAuth, login, logout } from '$lib/firebase/auth.svelte';
+	import { draftStatus } from '$lib/content/draftStatus.svelte';
 
 	let { children } = $props();
 
 	onMount(() => initAuth());
+
+	// Keep the "unpublished changes" indicator current: re-check when the editor
+	// signs in and after every navigation between editor pages.
+	$effect(() => {
+		if (authStore.user) draftStatus.check();
+	});
+	afterNavigate(() => {
+		if (authStore.user) draftStatus.check();
+	});
 
 	let email = $state('');
 	let password = $state('');
@@ -41,6 +52,16 @@
 				<a href={resolve('/play')}>▶ Play</a>
 			</nav>
 			<span class="spacer"></span>
+			{#if draftStatus.dirty}
+				<a
+					class="status dirty"
+					href={resolve('/editor')}
+					title="The draft has changes that aren't live yet — open the dashboard to publish"
+					>● unpublished changes</a
+				>
+			{:else if draftStatus.checked}
+				<span class="status clean" title="The draft matches the live build">✓ published</span>
+			{/if}
 			<span class="who">{authStore.user.email}</span>
 			<button type="button" onclick={() => logout()}>sign out</button>
 		{/if}
@@ -93,6 +114,20 @@
 	}
 	.who {
 		color: var(--ink-dim);
+	}
+	.status {
+		font-size: 0.8rem;
+		white-space: nowrap;
+	}
+	.status.dirty {
+		color: #ff5a4a;
+		text-decoration: none;
+	}
+	.status.dirty:hover {
+		text-decoration: underline;
+	}
+	.status.clean {
+		color: #9fc0a8;
 	}
 	main {
 		max-width: 64rem;

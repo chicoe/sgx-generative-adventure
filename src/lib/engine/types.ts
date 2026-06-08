@@ -52,6 +52,14 @@ export interface Exit {
 	condition?: Condition;
 }
 
+// An item the computer MAY hand the player while in this scene (only here), if
+// they earn/convince it. `chance` (0..1) is rolled on entry to decide whether
+// the item is actually present this run.
+export interface GiveableItem {
+	itemId: string;
+	chance: number;
+}
+
 // CSS grade applied over the layer stack (SPEC §6). Author-configurable.
 export interface FilterSpec {
 	// Raw CSS `filter` value, e.g. 'contrast(1.1) saturate(0.8) hue-rotate(8deg)'.
@@ -73,6 +81,7 @@ export interface Scene {
 	onEnter?: Effect[];
 	introText?: string; // optional narration shown on enter
 	prompt?: string; // scene description + instructions given to the LLM as context
+	giveableItems?: GiveableItem[]; // items the computer may grant here (rolled per run)
 	start?: boolean; // a possible starting scene — one is chosen at random per run
 	ending?: boolean; // reaching it ends the run (then auto/interaction restart)
 }
