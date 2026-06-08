@@ -31,6 +31,11 @@
 	// --- state ---------------------------------------------------------------
 	let build = $state<Build>(placeholderBuild);
 	let buildSource = $state<'firestore' | 'placeholder'>('placeholder');
+	// The page seeds itself with the placeholder build so SSR/first paint has
+	// something to render, then swaps in the live build in onMount. `loading`
+	// holds a boot overlay over the frame during that swap, so the placeholder
+	// content never flashes before the real build arrives.
+	let loading = $state(true);
 	let game = $state<GameState>(startGame(placeholderBuild).state);
 
 	type Line = {
@@ -311,14 +316,17 @@
 	onMount(() => {
 		computeScale();
 		const clockId = setInterval(() => (clockNow = Date.now()), 1000);
-		loadActiveBuild().then(({ build: loaded, source }) => {
-			buildSource = source;
-			if (source === 'firestore') {
-				build = loaded;
-				initFrom(loaded);
-			}
-			afterEnter();
-		});
+		loadActiveBuild()
+			.then(({ build: loaded, source }) => {
+				buildSource = source;
+				if (source === 'firestore') {
+					build = loaded;
+					initFrom(loaded);
+				}
+				loading = false; // reveal the resolved build (live or placeholder fallback)
+				afterEnter();
+			})
+			.catch(() => (loading = false));
 
 		let raf = 0;
 		let t = 0;
@@ -414,6 +422,13 @@
 			</form>
 		</section>
 
+		{#if loading}
+			<div class="boot" out:fade={{ duration: 250 }}>
+				<span class="boot-name">ARG-OS</span>
+				<span class="boot-sub">establishing link…<span class="bcur">█</span></span>
+			</div>
+		{/if}
+
 		<div class="crt" aria-hidden="true"></div>
 	</div>
 </main>
@@ -436,6 +451,36 @@
 		position: relative;
 		overflow: hidden;
 		transform-origin: center;
+	}
+
+	/* Boot overlay shown while the active build loads — hides the placeholder
+	   seed until the real build is in. */
+	.boot {
+		position: absolute;
+		inset: 0;
+		z-index: 90;
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		justify-content: center;
+		gap: 0.5rem;
+		background: var(--bg);
+	}
+	.boot-name {
+		font-family: var(--font-ui);
+		font-weight: 700;
+		letter-spacing: 0.4em;
+		font-size: 1.6rem;
+		color: var(--accent);
+		text-shadow: var(--glow);
+	}
+	.boot-sub {
+		font-family: var(--font-terminal);
+		font-size: 0.9rem;
+		color: var(--ink-dim);
+	}
+	.bcur {
+		animation: blink 1.1s steps(1) infinite;
 	}
 
 	/* CRT scanlines + vignette + a faint phosphor flicker over the game frame. */
@@ -660,6 +705,25 @@
 		gap: 0.35rem;
 		font-size: 0.95rem;
 		line-height: 1.45;
+		/* Firefox / standards scrollbar. */
+		scrollbar-width: thin;
+		scrollbar-color: var(--ink-dim) rgba(74, 56, 20, 0.18);
+	}
+	/* Blocky amber scrollbar to match the CRT chrome (Chromium kiosk target). */
+	.transcript::-webkit-scrollbar {
+		width: 0.55rem;
+	}
+	.transcript::-webkit-scrollbar-track {
+		background: rgba(74, 56, 20, 0.18);
+		border-left: 1px solid var(--line);
+	}
+	.transcript::-webkit-scrollbar-thumb {
+		background: var(--ink-dim);
+		border: 1px solid #1a1206;
+		box-shadow: 0 0 6px rgba(255, 176, 0, 0.4) inset;
+	}
+	.transcript::-webkit-scrollbar-thumb:hover {
+		background: var(--ink);
 	}
 	.transcript p {
 		margin: 0;
