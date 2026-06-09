@@ -70,6 +70,39 @@ Or trigger one manually:
 firebase apphosting:rollouts:create <backend-id> --project sgx-generative-adventure
 ```
 
+## Changing the Gemini API key (e.g. switch to the client's)
+
+The key lives in three independent places — update whichever apply. Swapping to a
+key from a different Google account/project is fine; it's just another Developer
+API key (make sure that account has billing/quota, or the server logs
+`RESOURCE_EXHAUSTED`).
+
+**1. Production (App Hosting).** The key is a Secret Manager secret. Add a new
+version, then roll out so the backend picks it up:
+
+```bash
+firebase apphosting:secrets:set GEMINI_API_KEY --project sgx-generative-adventure
+# paste the new key when prompted
+firebase apphosting:rollouts:create <backend-id> --project sgx-generative-adventure
+# (or just `git push origin main` — any rollout adopts the new version)
+```
+
+The previous secret version stays in Secret Manager; disable or destroy it in the
+console once the new rollout is live. Access granted to the backend carries over
+to new versions, so there's nothing else to re-authorize.
+
+**2. Local dev.** Edit `GEMINI_API_KEY=` in `.env` and restart `npm run dev`.
+
+**3. Raspberry Pi.** Edit `GEMINI_API_KEY=` in the Pi's `.env`, then restart the
+kiosk — no rebuild, the server reads the key at runtime:
+
+```bash
+sudo systemctl restart sgx-kiosk
+```
+
+(Changing the model is the same idea but simpler — `GEMINI_MODEL` is a plain value
+in `apphosting.yaml` / `.env`, not a secret: edit it and redeploy / restart.)
+
 ## Notes
 
 - **Firestore/Storage rules** deploy separately (already live): re-run after any
