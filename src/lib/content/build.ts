@@ -1,12 +1,20 @@
 // Build assembly + validation + (de)serialization (SPEC §4.6, M3). Pure — no
 // Firebase imports — so publish validation is unit-testable. The Firestore
 // writes live in the server-only publish module.
-import type { Build, Condition, Effect, Item, LLMBehaviour, Scene } from '../engine/types';
+import type {
+	Build,
+	Condition,
+	DisplaySettings,
+	Effect,
+	Item,
+	LLMBehaviour,
+	Scene
+} from '../engine/types';
 import { itemSchema, llmBehaviourSchema, sceneSchema, buildSchema } from './schema';
 
 /** The editable draft content the editor maintains (SPEC §4.6 draft/*). */
 export interface DraftContent {
-	meta: { startSceneId: string; defaultBehaviourId?: string };
+	meta: { startSceneId: string; defaultBehaviourId?: string; display?: DisplaySettings };
 	scenes: Scene[];
 	items: Item[];
 	behaviours: LLMBehaviour[];
@@ -143,7 +151,8 @@ export function assembleBuild(
 			version,
 			publishedAt,
 			startSceneId: draft.meta.startSceneId,
-			defaultBehaviourId: draft.meta.defaultBehaviourId
+			defaultBehaviourId: draft.meta.defaultBehaviourId,
+			display: draft.meta.display
 		},
 		scenes: draft.scenes,
 		items: draft.items,

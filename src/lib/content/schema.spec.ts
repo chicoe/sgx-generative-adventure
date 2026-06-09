@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { buildSchema, conditionSchema, effectSchema, sceneSchema } from './schema';
+import {
+	buildSchema,
+	conditionSchema,
+	displaySettingsSchema,
+	effectSchema,
+	sceneSchema
+} from './schema';
 import { placeholderBuild } from '../game/placeholderBuild';
 
 describe('content schema', () => {
@@ -29,5 +35,27 @@ describe('content schema', () => {
 		expect(
 			sceneSchema.safeParse({ id: '', name: 'x', layers: [], hotspots: [], exits: [] }).success
 		).toBe(false);
+	});
+
+	it('validates display settings (hex colours, mode, opacity range)', () => {
+		const base = {
+			width: 1280,
+			height: 720,
+			center: true,
+			marginLeft: 0,
+			marginTop: 0,
+			bg: '#0a0805',
+			ui: '#ffb000',
+			mode: 'full',
+			uiOpacity: 0.74,
+			crt: 1
+		};
+		expect(displaySettingsSchema.safeParse(base).success).toBe(true);
+		expect(displaySettingsSchema.safeParse({ ...base, mode: 'gradient' }).success).toBe(true);
+		expect(displaySettingsSchema.safeParse({ ...base, mode: 'duotone' }).success).toBe(true);
+		expect(displaySettingsSchema.safeParse({ ...base, bg: 'red' }).success).toBe(false);
+		expect(displaySettingsSchema.safeParse({ ...base, mode: 'sepia' }).success).toBe(false);
+		expect(displaySettingsSchema.safeParse({ ...base, uiOpacity: 2 }).success).toBe(false);
+		expect(displaySettingsSchema.safeParse({ ...base, crt: 5 }).success).toBe(false);
 	});
 });

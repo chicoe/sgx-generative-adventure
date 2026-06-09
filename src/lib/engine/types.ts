@@ -136,6 +136,24 @@ export interface GameState {
 }
 
 // ---------------------------------------------------------------------------
+// Global display/theme settings — author-configurable in the editor, applied
+// across the whole runtime (resolution, placement, palette, opacity).
+// ---------------------------------------------------------------------------
+export interface DisplaySettings {
+	width: number; // gameplay resolution, px
+	height: number;
+	center: boolean; // center on screen (ignores the margins below) vs. top-left + margins
+	marginLeft: number; // px from the left edge when not centered
+	marginTop: number; // px from the top edge when not centered
+	bg: string; // background colour (hex)
+	ui: string; // UI / ink colour (hex)
+	// full colour · duotone gradient (luminance map) · duotone (hard two-colour, no in-betweens)
+	mode: 'full' | 'gradient' | 'duotone';
+	uiOpacity: number; // 0..1 — opacity of the overlay panels (forced opaque in hard duotone)
+	crt: number; // 0..1 — CRT effect strength (scanlines, vignette, phosphor glow)
+}
+
+// ---------------------------------------------------------------------------
 // Build — an immutable published snapshot the GAME reads (SPEC §4.6).
 // ---------------------------------------------------------------------------
 export interface BuildMeta {
@@ -143,6 +161,7 @@ export interface BuildMeta {
 	publishedAt: string; // ISO timestamp
 	startSceneId: string;
 	defaultBehaviourId?: string; // the ship-wide computer the player talks to
+	display?: DisplaySettings; // global look; runtime falls back to DEFAULT_DISPLAY
 }
 
 export interface Build {

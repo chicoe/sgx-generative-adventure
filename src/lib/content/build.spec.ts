@@ -77,6 +77,34 @@ describe('assembleBuild', () => {
 		expect(r.errors.length).toBeGreaterThan(0);
 	});
 
+	it('carries display settings into the build meta', () => {
+		const r = assembleBuild(
+			{
+				...validDraft,
+				meta: {
+					startSceneId: 'a',
+					display: {
+						width: 800,
+						height: 600,
+						center: false,
+						marginLeft: 10,
+						marginTop: 20,
+						bg: '#102030',
+						ui: '#a0b0c0',
+						mode: 'duotone',
+						uiOpacity: 0.5,
+						crt: 0.5
+					}
+				}
+			},
+			1,
+			'now'
+		);
+		expect(r.errors).toEqual([]);
+		expect(r.build?.meta.display?.mode).toBe('duotone');
+		expect(r.build?.meta.display?.width).toBe(800);
+	});
+
 	it('flags a default behaviour that does not exist', () => {
 		const r = assembleBuild(
 			{ ...validDraft, meta: { startSceneId: 'a', defaultBehaviourId: 'ghost' } },

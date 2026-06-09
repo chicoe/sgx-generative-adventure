@@ -1,0 +1,431 @@
+<script lang="ts">
+	import { onMount } from 'svelte';
+	import { loadDraft, setDisplay } from '$lib/content/draft';
+	import { draftStatus } from '$lib/content/draftStatus.svelte';
+	import {
+		DEFAULT_DISPLAY,
+		COLOR_PRESETS,
+		themeStyle,
+		duotoneTable,
+		crtBackground
+	} from '$lib/theme';
+	import type { DisplaySettings } from '$lib/engine/types';
+
+	let display = $state<DisplaySettings>({ ...DEFAULT_DISPLAY });
+	let busy = $state(false);
+	let message = $state('');
+
+	onMount(() =>
+		loadDraft()
+			.then((d) => {
+				if (d?.meta.display) display = { ...DEFAULT_DISPLAY, ...d.meta.display };
+			})
+			.catch((e) => (message = String(e)))
+	);
+
+	function applyPreset(p: (typeof COLOR_PRESETS)[number]) {
+		display.bg = p.bg;
+		display.ui = p.ui;
+		display.mode = p.mode;
+	}
+
+	async function save() {
+		busy = true;
+		message = '';
+		try {
+			await setDisplay({
+				...$state.snapshot(display),
+				width: Math.round(display.width) || DEFAULT_DISPLAY.width,
+				height: Math.round(display.height) || DEFAULT_DISPLAY.height,
+				marginLeft: Math.max(0, Math.round(display.marginLeft) || 0),
+				marginTop: Math.max(0, Math.round(display.marginTop) || 0)
+			});
+			draftStatus.markDirty();
+			message = 'Saved to the draft. Publish to apply it to the live game.';
+		} catch (e) {
+			message = e instanceof Error ? e.message : String(e);
+		} finally {
+			busy = false;
+		}
+	}
+
+	// --- preview geometry (proportional, on a 1920×1080 reference screen) -------
+	const REF_W = 1920;
+	const REF_H = 1080;
+	const PREVIEW_W = 460;
+	const k = PREVIEW_W / REF_W;
+	const previewH = REF_H * k;
+
+	const fit = $derived(Math.min(1, REF_W / (display.width || 1), REF_H / (display.height || 1)));
+	const fw = $derived(display.width * fit * k);
+	const fh = $derived(display.height * fit * k);
+	const fleft = $derived(display.center ? (PREVIEW_W - fw) / 2 : display.marginLeft * k);
+	const ftop = $derived(display.center ? (previewH - fh) / 2 : display.marginTop * k);
+	const dt = $derived(duotoneTable(display.bg, display.ui));
+	const duoFunc = $derived(display.mode === 'duotone' ? 'discrete' : 'table');
+	const pcrtBg = $derived(crtBackground(display.crt));
+</script>
+
+<h1>Display</h1>
+<p class="note">Global look — applies to the whole game once published.</p>
+{#if message}<p class="msg">{message}</p>{/if}
+
+<div class="grid">
+	<div class="form">
+		<fieldset>
+			<legend>resolution (px)</legend>
+			<div class="row">
+				<label class="num">width <input type="number" min="160" bind:value={display.width} /></label
+				>
+				<label class="num"
+					>height <input type="number" min="160" bind:value={display.height} /></label
+				>
+			</div>
+		</fieldset>
+
+		<fieldset>
+			<legend>placement</legend>
+			<label class="chk"
+				><input type="checkbox" bind:checked={display.center} /> center on screen</label
+			>
+			<div class="row" class:disabled={display.center}>
+				<label class="num"
+					>left margin
+					<input type="number" min="0" bind:value={display.marginLeft} disabled={display.center} />
+				</label>
+				<label class="num"
+					>top margin
+					<input type="number" min="0" bind:value={display.marginTop} disabled={display.center} />
+				</label>
+			</div>
+		</fieldset>
+
+		<fieldset>
+			<legend>palette</legend>
+			<div class="row">
+				<label class="color"
+					>background <input type="color" bind:value={display.bg} /><code>{display.bg}</code></label
+				>
+				<label class="color"
+					>ui / ink <input type="color" bind:value={display.ui} /><code>{display.ui}</code></label
+				>
+			</div>
+			<div class="presets">
+				{#each COLOR_PRESETS as p (p.name)}
+					<button
+						type="button"
+						class="preset"
+						style="--pb:{p.bg};--pu:{p.ui}"
+						onclick={() => applyPreset(p)}
+					>
+						<span class="sw"></span>{p.name}
+					</button>
+				{/each}
+			</div>
+		</fieldset>
+
+		<fieldset>
+			<legend>colour mode</legend>
+			<label class="chk"
+				><input type="radio" value="full" bind:group={display.mode} /> full colour (scene art in full
+				colour, UI in the palette)</label
+			>
+			<label class="chk"
+				><input type="radio" value="gradient" bind:group={display.mode} /> duotone gradient (luminance
+				mapped to the two colours)</label
+			>
+			<label class="chk"
+				><input type="radio" value="duotone" bind:group={display.mode} /> duotone (only the two colours
+				— hard, no in-betweens, opaque panels)</label
+			>
+		</fieldset>
+
+		<fieldset>
+			<legend>UI opacity — {Math.round(display.uiOpacity * 100)}%</legend>
+			<input
+				type="range"
+				min="0"
+				max="100"
+				step="1"
+				value={Math.round(display.uiOpacity * 100)}
+				disabled={display.mode === 'duotone'}
+				oninput={(e) => (display.uiOpacity = e.currentTarget.valueAsNumber / 100)}
+			/>
+			{#if display.mode === 'duotone'}<span class="muted small"
+					>panels are opaque in hard duotone</span
+				>{/if}
+		</fieldset>
+
+		<fieldset>
+			<legend>CRT effect — {Math.round(display.crt * 100)}%</legend>
+			<input
+				type="range"
+				min="0"
+				max="100"
+				step="1"
+				value={Math.round(display.crt * 100)}
+				oninput={(e) => (display.crt = e.currentTarget.valueAsNumber / 100)}
+			/>
+			<span class="muted small">scanlines, vignette &amp; phosphor glow</span>
+		</fieldset>
+
+		<div class="actions">
+			<button type="button" class="primary" onclick={save} disabled={busy}>Save</button>
+		</div>
+	</div>
+
+	<div class="preview">
+		<h2>
+			Preview <span class="muted">({display.width} × {display.height}, on a 1080p screen)</span>
+		</h2>
+		<div class="screen" style="width:{PREVIEW_W}px;height:{previewH}px">
+			<div
+				class="pframe"
+				style="{themeStyle(display)};width:{fw}px;height:{fh}px;left:{fleft}px;top:{ftop}px"
+			>
+				<div class="pcontent" class:duo={display.mode !== 'full'}>
+					<div class="pscene"></div>
+					<div class="pstatus">ARG-OS v0.5.2 · CRITICAL</div>
+					<div class="pterm">&gt; ARGOS ready_</div>
+				</div>
+				<div class="pcrt" style:background={pcrtBg}></div>
+			</div>
+		</div>
+		<p class="muted small">
+			Save writes to the draft; the live game changes only after you publish.
+		</p>
+	</div>
+</div>
+
+<!-- duotone luminance map (dark → bg, light → ui) -->
+<svg width="0" height="0" aria-hidden="true" style="position:absolute">
+	<filter id="sgx-duotone-preview" color-interpolation-filters="sRGB">
+		<feColorMatrix
+			type="matrix"
+			values="0.299 0.587 0.114 0 0 0.299 0.587 0.114 0 0 0.299 0.587 0.114 0 0 0 0 0 1 0"
+		/>
+		<feComponentTransfer>
+			<feFuncR type={duoFunc} tableValues={dt.r} />
+			<feFuncG type={duoFunc} tableValues={dt.g} />
+			<feFuncB type={duoFunc} tableValues={dt.b} />
+		</feComponentTransfer>
+	</filter>
+</svg>
+
+<style>
+	h1 {
+		margin: 0 0 0.5rem;
+	}
+	h2 {
+		margin: 0 0 0.6rem;
+		font-size: 1rem;
+	}
+	.note {
+		color: #d8c98a;
+		background: #2a2410;
+		border: 1px dashed #6b5e2a;
+		padding: 0.4rem 0.7rem;
+		font-size: 0.8rem;
+	}
+	.msg {
+		color: var(--accent);
+	}
+	.muted {
+		color: var(--ink-dim);
+	}
+	.small {
+		font-size: 0.75rem;
+	}
+	.grid {
+		display: grid;
+		grid-template-columns: 1fr auto;
+		gap: 1.4rem;
+		align-items: start;
+	}
+	.form {
+		display: flex;
+		flex-direction: column;
+		gap: 0.8rem;
+		max-width: 34rem;
+	}
+	fieldset {
+		border: 1px solid var(--line);
+		margin: 0;
+		padding: 0.5rem 0.7rem 0.7rem;
+		display: flex;
+		flex-direction: column;
+		gap: 0.5rem;
+	}
+	legend {
+		color: var(--ink-dim);
+		font-size: 0.8rem;
+		padding: 0 0.4rem;
+	}
+	.row {
+		display: flex;
+		gap: 0.8rem;
+		flex-wrap: wrap;
+	}
+	.row.disabled {
+		opacity: 0.45;
+	}
+	label {
+		font-size: 0.78rem;
+		color: var(--ink-dim);
+	}
+	.num {
+		display: flex;
+		align-items: center;
+		gap: 0.4rem;
+	}
+	.num input {
+		width: 6rem;
+	}
+	.color {
+		display: flex;
+		align-items: center;
+		gap: 0.4rem;
+	}
+	.chk {
+		display: flex;
+		align-items: center;
+		gap: 0.4rem;
+		color: var(--ink);
+	}
+	input,
+	code {
+		font: inherit;
+		color: var(--ink);
+	}
+	input[type='number'] {
+		background: #0c0e11;
+		border: 1px solid var(--line);
+		padding: 0.3rem 0.45rem;
+	}
+	input[type='color'] {
+		width: 2.4rem;
+		height: 1.8rem;
+		padding: 0;
+		background: none;
+		border: 1px solid var(--line);
+	}
+	input[type='range'] {
+		width: 100%;
+		accent-color: var(--accent);
+	}
+	code {
+		font-size: 0.75rem;
+		color: var(--ink-dim);
+	}
+	.presets {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.4rem;
+	}
+	.preset {
+		display: flex;
+		align-items: center;
+		gap: 0.35rem;
+		font: inherit;
+		font-size: 0.75rem;
+		cursor: pointer;
+		color: var(--ink);
+		background: #0c0e11;
+		border: 1px solid var(--line);
+		padding: 0.25rem 0.5rem;
+	}
+	.preset:hover {
+		border-color: var(--accent);
+	}
+	.preset .sw {
+		width: 1.1rem;
+		height: 1.1rem;
+		border: 1px solid var(--line);
+		background: linear-gradient(135deg, var(--pb) 0 50%, var(--pu) 50% 100%);
+	}
+	.actions {
+		margin-top: 0.3rem;
+	}
+	button {
+		font: inherit;
+		cursor: pointer;
+		color: var(--ink);
+		background: #0c0e11;
+		border: 1px solid var(--line);
+		padding: 0.4rem 0.8rem;
+	}
+	button:hover:not(:disabled) {
+		border-color: var(--accent);
+		color: var(--accent);
+	}
+	button:disabled {
+		opacity: 0.5;
+	}
+	.primary {
+		border-color: var(--accent);
+	}
+
+	/* --- preview --- */
+	.preview {
+		position: sticky;
+		top: 1rem;
+	}
+	.screen {
+		position: relative;
+		overflow: hidden;
+		background: #000;
+		border: 1px solid var(--line);
+		box-shadow: inset 0 0 0 1px #000;
+	}
+	.pframe {
+		position: absolute;
+		overflow: hidden;
+		background: var(--bg);
+	}
+	.pscene {
+		position: absolute;
+		inset: 0;
+		background:
+			radial-gradient(circle at 30% 30%, #6fb0e0, transparent 55%),
+			radial-gradient(circle at 75% 65%, #e0a040, transparent 50%),
+			linear-gradient(160deg, #243044, #5a3a2a 60%, #101418);
+	}
+	.pcontent {
+		position: absolute;
+		inset: 0;
+	}
+	.pcontent.duo {
+		filter: url(#sgx-duotone-preview);
+	}
+	.pcrt {
+		position: absolute;
+		inset: 0;
+		pointer-events: none;
+		z-index: 2;
+	}
+	.pstatus {
+		position: absolute;
+		left: 6%;
+		right: 6%;
+		top: 6%;
+		padding: 2px 5px;
+		font-size: 8px;
+		color: var(--ink);
+		background: var(--overlay-bg);
+		border: 1px solid var(--line);
+		white-space: nowrap;
+		overflow: hidden;
+	}
+	.pterm {
+		position: absolute;
+		left: 6%;
+		right: 6%;
+		bottom: 6%;
+		height: 34%;
+		padding: 3px 5px;
+		font-size: 9px;
+		color: var(--ink);
+		background: var(--overlay-bg);
+		border: 1px solid var(--line);
+	}
+</style>

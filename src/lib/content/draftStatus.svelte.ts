@@ -31,10 +31,12 @@ function signature(c: {
 	behaviours: { id: string }[];
 	startSceneId?: string;
 	defaultBehaviourId?: string;
+	display?: unknown;
 }): string {
 	return stable({
 		startSceneId: c.startSceneId ?? '',
 		defaultBehaviourId: c.defaultBehaviourId ?? '',
+		display: c.display ?? null,
 		scenes: byId(c.scenes),
 		items: byId(c.items),
 		behaviours: byId(c.behaviours)
@@ -47,7 +49,8 @@ const draftSig = (d: DraftContent) =>
 		items: d.items,
 		behaviours: d.behaviours,
 		startSceneId: d.meta.startSceneId,
-		defaultBehaviourId: d.meta.defaultBehaviourId
+		defaultBehaviourId: d.meta.defaultBehaviourId,
+		display: d.meta.display
 	});
 const buildSig = (b: Build) =>
 	signature({
@@ -55,7 +58,8 @@ const buildSig = (b: Build) =>
 		items: b.items,
 		behaviours: b.behaviours,
 		startSceneId: b.meta.startSceneId,
-		defaultBehaviourId: b.meta.defaultBehaviourId
+		defaultBehaviourId: b.meta.defaultBehaviourId,
+		display: b.meta.display
 	});
 
 class DraftStatus {

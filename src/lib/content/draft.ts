@@ -12,7 +12,7 @@ import {
 	writeBatch
 } from 'firebase/firestore';
 import { db } from '../firebase/client';
-import type { Build, Item, LLMBehaviour, Scene } from '../engine/types';
+import type { Build, DisplaySettings, Item, LLMBehaviour, Scene } from '../engine/types';
 import type { DraftContent } from './build';
 
 const rootDoc = () => doc(db(), 'draft', 'content');
@@ -32,7 +32,8 @@ export async function loadDraft(): Promise<DraftContent | null> {
 	return {
 		meta: {
 			startSceneId: (meta.data()?.startSceneId as string) ?? '',
-			defaultBehaviourId: meta.data()?.defaultBehaviourId as string | undefined
+			defaultBehaviourId: meta.data()?.defaultBehaviourId as string | undefined,
+			display: meta.data()?.display as DisplaySettings | undefined
 		},
 		scenes: scenes.docs.map((d) => d.data() as Scene),
 		items: items.docs.map((d) => d.data() as Item),
@@ -47,6 +48,11 @@ export async function setStartScene(sceneId: string) {
 /** The ship-wide computer the player talks to in every scene. */
 export async function setDefaultBehaviour(behaviourId: string) {
 	await setDoc(rootDoc(), { defaultBehaviourId: behaviourId }, { merge: true });
+}
+
+/** Global display/theme settings (resolution, palette, opacity, …). */
+export async function setDisplay(display: DisplaySettings) {
+	await setDoc(rootDoc(), { display: clean(display) }, { merge: true });
 }
 
 // Editor-only graph node layout, kept on the draft root doc (not part of the

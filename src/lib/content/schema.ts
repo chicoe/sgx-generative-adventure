@@ -103,11 +103,25 @@ export const llmBehaviourSchema = z.object({
 	onDeniedEffects: z.array(effectSchema).optional()
 });
 
+export const displaySettingsSchema = z.object({
+	width: z.number().int().min(160).max(7680),
+	height: z.number().int().min(160).max(4320),
+	center: z.boolean(),
+	marginLeft: z.number().int().min(0).max(4320),
+	marginTop: z.number().int().min(0).max(4320),
+	bg: z.string().regex(/^#[0-9a-fA-F]{6}$/),
+	ui: z.string().regex(/^#[0-9a-fA-F]{6}$/),
+	mode: z.enum(['full', 'gradient', 'duotone']),
+	uiOpacity: z.number().min(0).max(1),
+	crt: z.number().min(0).max(1)
+});
+
 export const buildMetaSchema = z.object({
 	version: z.number(),
 	publishedAt: z.string(),
 	startSceneId: z.string().min(1),
-	defaultBehaviourId: z.string().optional()
+	defaultBehaviourId: z.string().optional(),
+	display: displaySettingsSchema.optional()
 });
 
 export const buildSchema = z.object({

@@ -49,6 +49,8 @@
 				<a href={resolve('/editor/scenes')}>Scenes</a>
 				<a href={resolve('/editor/items')}>Items</a>
 				<a href={resolve('/editor/behaviours')}>Behaviours</a>
+				<a href={resolve('/editor/settings')}>Display</a>
+				<a href={resolve('/testplay')}>▶ Test</a>
 				<a href={resolve('/play')}>▶ Play</a>
 			</nav>
 			<span class="spacer"></span>
