@@ -1,0 +1,27 @@
+# systemd unit to run the kiosk on boot, on the graphical (X11) session.
+#
+# Install (adjust User + paths to your Pi):
+#   sudo cp scripts/sgx-kiosk.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now sgx-kiosk.service
+#   journalctl -u sgx-kiosk -f          # follow logs
+#
+# Assumes the desktop auto-logs-in (raspi-config -> System Options -> Boot/Auto
+# Login -> Desktop Autologin) so an X display is available at :0.
+[Unit]
+Description=SGX Retro LLM Adventure — kiosk
+After=graphical.target network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+Environment=DISPLAY=:0
+Environment=XAUTHORITY=/home/pi/.Xauthority
+WorkingDirectory=/home/pi/sgx-generative-adventure
+ExecStart=/home/pi/sgx-generative-adventure/scripts/kiosk.sh
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=graphical.target

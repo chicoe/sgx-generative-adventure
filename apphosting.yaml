@@ -9,7 +9,7 @@ runConfig:
 env:
   # Public client config — exposed to the browser bundle (PUBLIC_ prefix).
   - variable: PUBLIC_FIREBASE_CONFIG
-    value: '{}' # replace with your project's web-app config JSON
+    value: '{"projectId":"sgx-generative-adventure","appId":"1:75815622349:web:c44f999ec4d0e4c630fb84","storageBucket":"sgx-generative-adventure.firebasestorage.app","apiKey":"AIzaSyBs3QmAv0cmZZsTDSjt8V0W8E3eYkQSvwI","authDomain":"sgx-generative-adventure.firebaseapp.com","messagingSenderId":"75815622349","measurementId":"G-VJM8HXB6FL","projectNumber":"75815622349","version":"2"}'
     availability:
       - BUILD
       - RUNTIME
@@ -20,7 +20,7 @@ env:
       - RUNTIME
 
   - variable: EDITOR_ALLOWED_EMAILS
-    value: 'francisco@incomputable.io'
+    value: 'francisco@incomputable.io,test@incomputable.io'
     availability:
       - RUNTIME
 
