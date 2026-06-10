@@ -40,7 +40,9 @@
 	--amber: #ffb000;
 	--glow: 0 0 6px rgba(255, 176, 0, 0.4);
 	--mono: ui-monospace, 'SF Mono', 'Cascadia Code', 'Roboto Mono', Menlo, Consolas, monospace;
-	--font-ui: 'Monaspace Neon', var(--mono);
+	/* Owner direction: Monaspace Krypton everywhere (UI + terminal). The Neon
+	   @font-face declarations above stay but are unused (browsers won't fetch them). */
+	--font-ui: 'Monaspace Krypton', var(--mono);
 	--font-terminal: 'Monaspace Krypton', var(--mono);
 	font-family: var(--font-ui);
 }

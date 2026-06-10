@@ -27,11 +27,11 @@ describe('theme', () => {
 		expect(rgba('#ff0000', 0.5)).toBe('rgba(255, 0, 0, 0.5)');
 	});
 
-	it('themeVars maps the two colours onto the CSS variables', () => {
+	it('themeVars maps the two colours onto the CSS variables (panels opaque)', () => {
 		const v = themeVars({ ...DEFAULT_DISPLAY, bg: '#000000', ui: '#ffffff', uiOpacity: 0.5 });
 		expect(v['--bg']).toBe('#000000');
 		expect(v['--ink']).toBe('#ffffff');
-		expect(v['--overlay-bg']).toBe('rgba(0, 0, 0, 0.5)');
+		expect(v['--overlay-bg']).toBe('#000000'); // uiOpacity is retired — solid panels
 	});
 
 	it('collapses to pure two colours in hard duotone (opaque, no shades, no glow)', () => {
@@ -42,16 +42,16 @@ describe('theme', () => {
 			uiOpacity: 0.5,
 			mode: 'duotone'
 		});
-		expect(pure['--overlay-bg']).toBe('rgba(0, 0, 0, 1)'); // opaque
+		expect(pure['--overlay-bg']).toBe('#000000'); // opaque paper
 		expect(pure['--panel']).toBe('#000000'); // no intermediate shade → bg
 		expect(pure['--line']).toBe('#ffffff'); // borders → ui
 		expect(pure['--ink-dim']).toBe('#ffffff'); // dim text → ui
 		expect(pure['--glow']).toBe('none');
 	});
 
-	it('keeps soft shades + opacity in gradient mode', () => {
+	it('keeps soft shades in gradient mode (panels still opaque)', () => {
 		const g = themeVars({ ...DEFAULT_DISPLAY, bg: '#000000', uiOpacity: 0.5, mode: 'gradient' });
-		expect(g['--overlay-bg']).toBe('rgba(0, 0, 0, 0.5)');
+		expect(g['--overlay-bg']).toBe('#000000');
 		expect(g['--glow']).not.toBe('none');
 	});
 

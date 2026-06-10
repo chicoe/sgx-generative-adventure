@@ -57,5 +57,7 @@ describe('content schema', () => {
 		expect(displaySettingsSchema.safeParse({ ...base, mode: 'sepia' }).success).toBe(false);
 		expect(displaySettingsSchema.safeParse({ ...base, uiOpacity: 2 }).success).toBe(false);
 		expect(displaySettingsSchema.safeParse({ ...base, crt: 5 }).success).toBe(false);
+		expect(displaySettingsSchema.safeParse({ ...base, fontScale: 1.5 }).success).toBe(true);
+		expect(displaySettingsSchema.safeParse({ ...base, fontScale: 3 }).success).toBe(false);
 	});
 });

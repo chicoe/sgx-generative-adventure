@@ -15,7 +15,8 @@ export const DEFAULT_DISPLAY: DisplaySettings = {
 	mode: 'full',
 	uiOpacity: 0.74,
 	crt: 1,
-	invertUi: false
+	invertUi: false,
+	fontScale: 1
 };
 
 export interface ColorPreset {
@@ -28,7 +29,7 @@ export interface ColorPreset {
 // colours; the colour mode / CRT / etc. stay as the author has them.
 export const COLOR_PRESETS: ColorPreset[] = [
 	{ name: 'C64', bg: '#3a1bf2', ui: '#a8b7f8' },
-	{ name: 'T5100', bg: '#624129', ui: '#cd6606' },
+	{ name: 'T5100', bg: '#2b1c0e', ui: '#cd6606' },
 	{ name: 'Apple2', bg: '#2f3642', ui: '#99eea6' },
 	{ name: 'XeroxAlto', bg: '#0c0c0c', ui: '#eaeaea' },
 	{ name: 'Custom1', bg: '#1d0f44', ui: '#f44e38' }
@@ -96,7 +97,9 @@ export function themeVars(d: DisplaySettings): Record<string, string> {
 			'--accent': ink,
 			'--amber': ink,
 			'--glow': pure ? 'none' : `0 0 ${(6 * crt).toFixed(1)}px ${rgba(ink, 0.4 * crt)}`,
-			'--overlay-bg': rgba(paper, pure ? 1 : d.uiOpacity)
+			// Solid-bar layout: panels are opaque (uiOpacity is retired — translucency
+			// over the inverted backdrop would wash the blocks out).
+			'--overlay-bg': paper
 		};
 	}
 
@@ -113,7 +116,7 @@ export function themeVars(d: DisplaySettings): Record<string, string> {
 		'--accent': mix(b, '#ffffff', 0.25),
 		'--amber': b,
 		'--glow': `0 0 ${(6 * crt).toFixed(1)}px ${rgba(b, 0.4 * crt)}`,
-		'--overlay-bg': rgba(a, d.uiOpacity)
+		'--overlay-bg': a
 	};
 }
 

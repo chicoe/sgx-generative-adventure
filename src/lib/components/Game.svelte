@@ -80,19 +80,31 @@
 	}
 	// The frame's inline style: theme colours + resolution + placement (centered, or
 	// at the top-left offset by the margins). Scaled to fit, never up past 1:1.
+	// The page around the frame AND the frame's backdrop (behind the UI blocks) use
+	// the OPPOSITE palette colour from the UI background, so the blocks separate
+	// clearly from what's behind them.
+	const pageBg = $derived(display.invertUi ? display.bg : display.ui);
 	const frameStyle = $derived.by(() => {
 		const place = display.center
 			? `left:50%;top:50%;transform:translate(-50%,-50%) scale(${scale});transform-origin:center`
 			: `left:${display.marginLeft}px;top:${display.marginTop}px;transform:scale(${scale});transform-origin:top left`;
-		// A soft bg-coloured halo feathers the frame edge into the page so a kiosk
-		// bezel never shows a hard seam (the page background matches it).
-		const halo = `box-shadow:0 0 30px 18px ${display.bg}`;
-		return `${themeStyle(display)};width:${display.width}px;height:${display.height}px;${place};${halo}`;
+		return `${themeStyle(display)};background:${pageBg};width:${display.width}px;height:${display.height}px;${place}`;
 	});
 	// Refit when the resolution/placement changes (e.g. once the live build loads).
 	$effect(() => {
 		void [display.width, display.height, display.center, display.marginLeft, display.marginTop];
 		computeScale();
+	});
+	// Font-size multiplier: rem-sized text (chat, items) scales with the root
+	// font-size; the bars are px-sized constants so they can't overflow. Clamped to
+	// the same range as the editor slider. Restored on unmount so the editor pages
+	// aren't affected.
+	$effect(() => {
+		const s = clamp(display.fontScale ?? 1, 0.75, 1.5);
+		document.documentElement.style.fontSize = `${s * 100}%`;
+		return () => {
+			document.documentElement.style.fontSize = '';
+		};
 	});
 
 	// --- title/status bar -----------------------------------------------------
@@ -147,6 +159,12 @@
 			.filter((i): i is Item => !!i)
 			.slice(0, 9)
 	);
+
+	// The most recent computer reply is highlighted (inverted colours) in the chat.
+	const lastComputerId = $derived.by(() => {
+		for (let i = lines.length - 1; i >= 0; i--) if (lines[i].who === 'computer') return lines[i].id;
+		return -1;
+	});
 
 	function push(who: Line['who'], text?: string | null) {
 		if (!text) return;
@@ -446,7 +464,7 @@
 <svelte:head><title>Adventure Engine — Play</title></svelte:head>
 <svelte:window onkeydown={onKeydown} onkeyup={onKeyup} onresize={computeScale} />
 
-<main class="letterbox" style:background={display.bg}>
+<main class="letterbox" style:background={pageBg}>
 	<!-- Duotone luminance map (dark → bg, light → ui) for the "old monitor" mode. -->
 	<svg width="0" height="0" aria-hidden="true" style="position:absolute">
 		<filter id="sgx-duotone" color-interpolation-filters="sRGB">
@@ -500,50 +518,58 @@
 				</div>
 			</header>
 
-			<div class="stage">
-				{#key game.currentSceneId}
-					{@const snap = findScene(build.scenes, game.currentSceneId)!}
-					<div class="scene-holder" in:fade={{ duration: 450 }} out:fade={{ duration: 300 }}>
-						{#if sceneHasArt(snap)}
-							<SceneRenderer scene={snap} {look} />
-						{:else}
-							<div class="nosignal" aria-label="no signal">
-								<div class="static"></div>
-								<span class="nosignal-text">NO SIGNAL</span>
-							</div>
-						{/if}
+			<div class="mid">
+				<aside class="sidebar">
+					<div class="inventory" aria-label="inventory">
+						{#each Array.from({ length: 9 }) as _slot, idx (idx)}
+							{@const item = inventoryItems[idx]}
+							<button
+								type="button"
+								class="slot"
+								class:filled={!!item}
+								tabindex="-1"
+								disabled={!item || pending}
+								onclick={() => item && useItem(item)}
+								title={item ? `Use ${item.name} (press ${idx + 1})` : `slot ${idx + 1}`}
+							>
+								<span class="key">{idx + 1}</span>
+								{#if item}
+									{#if imgUrl(item.iconPath)}
+										<img src={imgUrl(item.iconPath)} alt={item.name} />
+									{:else}
+										<span class="nm">{item.name}</span>
+									{/if}
+								{/if}
+							</button>
+						{/each}
 					</div>
-				{/key}
-			</div>
+					<!-- (future: map goes here) -->
+				</aside>
 
-			<aside class="inventory" aria-label="inventory">
-				{#each Array.from({ length: 9 }) as _slot, idx (idx)}
-					{@const item = inventoryItems[idx]}
-					<button
-						type="button"
-						class="slot"
-						class:filled={!!item}
-						tabindex="-1"
-						disabled={!item || pending}
-						onclick={() => item && useItem(item)}
-						title={item ? `Use ${item.name} (press ${idx + 1})` : `slot ${idx + 1}`}
-					>
-						<span class="key">{idx + 1}</span>
-						{#if item}
-							{#if imgUrl(item.iconPath)}
-								<img src={imgUrl(item.iconPath)} alt={item.name} />
+				<div class="stage">
+					{#key game.currentSceneId}
+						{@const snap = findScene(build.scenes, game.currentSceneId)!}
+						<div class="scene-holder" in:fade={{ duration: 450 }} out:fade={{ duration: 300 }}>
+							{#if sceneHasArt(snap)}
+								<SceneRenderer scene={snap} {look} />
 							{:else}
-								<span class="nm">{item.name}</span>
+								<div class="nosignal" aria-label="no signal">
+									<div class="static"></div>
+									<span class="nosignal-text">NO SIGNAL</span>
+								</div>
 							{/if}
-						{/if}
-					</button>
-				{/each}
-			</aside>
+						</div>
+					{/key}
+				</div>
+			</div>
 
 			<section class="terminal">
 				<div class="transcript" bind:this={transcriptEl}>
 					{#each lines as line (line.id)}
-						<p class={line.who}>
+						<p
+							class={line.who}
+							class:latest={line.who === 'computer' && line.id === lastComputerId}
+						>
 							{#if line.who === 'player'}<span class="who">&gt;</span>{/if}{line.text.slice(
 								0,
 								line.revealed
@@ -594,11 +620,25 @@
 	.frame {
 		position: absolute;
 		overflow: hidden;
-		background: var(--bg);
+		/* backdrop colour comes from the inline frameStyle (the inverted pageBg) */
 	}
+	/* Solid-bar layout: constant-height top + bottom bars (px-sized, immune to the
+	   font multiplier), and a middle row where the 4:3 scene takes the full height
+	   flush against the right edge while the inventory fills all leftover space on
+	   the left. Spacing is px so blocks always sit tight. */
 	.content {
 		position: absolute;
 		inset: 0;
+		display: flex;
+		flex-direction: column;
+		gap: 10px;
+		padding: 12px;
+	}
+	.mid {
+		flex: 1;
+		min-height: 0;
+		display: flex;
+		gap: 10px;
 	}
 	/* Duotone modes: the UI inside .content is authored in MONOCHROME (themeVars
 	   emits white-on-black) and this one filter colourizes everything — scene art
@@ -606,7 +646,9 @@
 	   the frame can be off-palette or mismatch the scene. The .crt overlay stays a
 	   SIBLING (outside the filter), applied after quantization. */
 	.content.duo {
-		background: var(--bg);
+		/* The backdrop is the INK endpoint: the filter maps it to the ui colour —
+		   the same colour as the surround — so blocks separate in duotone too. */
+		background: var(--ink);
 		filter: url(#sgx-duotone);
 	}
 	/* Semantic non-palette colours (CRITICAL red, the LED) would otherwise
@@ -683,11 +725,17 @@
 		}
 	}
 
-	/* The scene fills the whole frame; the terminal floats over it. */
+	/* The scene: full middle-row height, strict 4:3, flush against the right edge
+	   (last flex child; the sidebar absorbs all leftover width). The image fills
+	   the box (SceneRenderer layers are object-fit: cover). */
 	.stage {
-		position: absolute;
-		inset: 0;
+		position: relative;
+		flex: none;
+		height: 100%;
+		aspect-ratio: 4 / 3;
+		max-width: 100%;
 		overflow: hidden;
+		border: 1px solid var(--line);
 		box-shadow: 0 0 60px rgba(255, 176, 0, 0.05) inset;
 	}
 	.scene-holder {
@@ -754,27 +802,24 @@
 		background: var(--overlay-bg);
 	}
 
-	/* Title/status bar overlay docked at the top, floating over the scene. */
+	/* Top info bar — constant size: px font + padding so the font multiplier can
+	   never overflow it. */
 	.statusbar {
-		position: absolute;
-		left: 1.2rem;
-		right: 1.2rem;
-		top: 1.2rem;
-		z-index: 80;
+		flex: none;
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
-		gap: 0.8rem;
-		padding: 0.45rem 0.9rem;
+		gap: 12px;
+		padding: 8px 14px;
+		overflow: hidden;
 		background: var(--overlay-bg);
 		border: 1px solid var(--line);
 		font-family: var(--font-ui);
-		font-size: 0.78rem;
+		font-size: 13px;
 		letter-spacing: 0.04em;
 		color: var(--ink);
 		text-shadow: var(--glow);
 		box-shadow: 0 0 22px rgba(255, 176, 0, 0.06);
-		backdrop-filter: blur(2px);
 	}
 	.statusbar .grp {
 		display: flex;
@@ -794,11 +839,11 @@
 	}
 	.statusbar .lbl {
 		color: var(--ink-dim);
-		font-size: 0.7rem;
+		font-size: 11px;
 	}
 	.statusbar .bld {
 		color: var(--ink-dim);
-		font-size: 0.7rem;
+		font-size: 11px;
 		letter-spacing: 0.05em;
 	}
 	.statusbar .bld.draft {
@@ -851,24 +896,31 @@
 		box-shadow: 0 0 8px #46b4ff;
 	}
 
-	/* Left-hand inventory HUD: 3×3 slots mapped to number keys 1–9. */
+	/* Left sidebar: absorbs ALL the width the 4:3 scene doesn't use; the inventory
+	   grows to fill it (slots as big as the space allows, capped by the row height
+	   via container units so the 3×3 grid never overflows vertically). */
+	.sidebar {
+		flex: 1;
+		min-width: 0;
+		container-type: size;
+		display: flex;
+		flex-direction: column;
+		gap: 10px;
+	}
+	/* Inventory: 3×3 slots mapped to number keys 1–9. */
 	.inventory {
-		position: absolute;
-		left: 1.2rem;
-		top: 4.4rem;
-		z-index: 80;
+		width: min(100%, 100cqh);
 		display: grid;
-		grid-template-columns: repeat(3, 3.1rem);
-		grid-auto-rows: 3.1rem;
-		gap: 0.35rem;
-		padding: 0.45rem;
+		grid-template-columns: repeat(3, 1fr);
+		gap: 6px;
+		padding: 8px;
 		background: var(--overlay-bg);
 		border: 1px solid var(--line);
 		box-shadow: 0 0 18px rgba(255, 176, 0, 0.05);
-		backdrop-filter: blur(2px);
 	}
 	.slot {
 		position: relative;
+		aspect-ratio: 1;
 		display: flex;
 		align-items: center;
 		justify-content: center;
@@ -914,23 +966,21 @@
 	}
 
 	/* Translucent overlay docked at the bottom, floating over the scene. */
+	/* Bottom chat bar — CONSTANT height (px). The transcript flexes inside it and
+	   scrolls, so larger fonts show fewer lines instead of overflowing; ~the last
+	   two messages are visible at 100%. */
 	.terminal {
-		position: absolute;
-		left: 1.2rem;
-		right: 1.2rem;
-		bottom: 1.2rem;
-		z-index: 80;
-		max-height: 44%;
+		flex: none;
+		height: 176px;
 		display: flex;
 		flex-direction: column;
-		gap: 0.5rem;
-		padding: 0.8rem 1rem;
+		gap: 8px;
+		padding: 12px 16px;
 		background: var(--overlay-bg);
 		border: 1px solid var(--line);
 		font-family: var(--font-terminal);
 		text-shadow: var(--glow);
 		box-shadow: 0 0 22px rgba(255, 176, 0, 0.06);
-		backdrop-filter: blur(2px);
 	}
 	.transcript {
 		flex: 1;
@@ -972,6 +1022,13 @@
 	}
 	.transcript .computer {
 		color: var(--accent);
+	}
+	/* The most recent computer reply: inverted colours so it can't be missed. */
+	.transcript p.latest {
+		background: var(--ink);
+		color: var(--bg);
+		text-shadow: none;
+		padding: 0.15rem 0.45rem;
 	}
 	.transcript .system {
 		color: var(--ink-dim);

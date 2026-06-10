@@ -143,21 +143,7 @@
 			>
 		</fieldset>
 
-		<fieldset>
-			<legend>UI opacity — {Math.round(display.uiOpacity * 100)}%</legend>
-			<input
-				type="range"
-				min="0"
-				max="100"
-				step="1"
-				value={Math.round(display.uiOpacity * 100)}
-				disabled={display.mode === 'duotone'}
-				oninput={(e) => (display.uiOpacity = e.currentTarget.valueAsNumber / 100)}
-			/>
-			{#if display.mode === 'duotone'}<span class="muted small"
-					>panels are opaque in hard duotone</span
-				>{/if}
-		</fieldset>
+		<!-- UI opacity is retired (solid-bar layout); the stored value persists. -->
 
 		<fieldset>
 			<legend>CRT effect — {Math.round(display.crt * 100)}%</legend>
@@ -172,6 +158,21 @@
 			<span class="muted small">scanlines, vignette &amp; phosphor glow</span>
 		</fieldset>
 
+		<fieldset>
+			<legend>font size — {Math.round((display.fontScale ?? 1) * 100)}%</legend>
+			<input
+				type="range"
+				min="75"
+				max="150"
+				step="5"
+				value={Math.round((display.fontScale ?? 1) * 100)}
+				oninput={(e) => (display.fontScale = e.currentTarget.valueAsNumber / 100)}
+			/>
+			<span class="muted small"
+				>scales the chat &amp; item text (the info bar stays constant); capped so nothing overflows</span
+			>
+		</fieldset>
+
 		<div class="actions">
 			<button type="button" class="primary" onclick={save} disabled={busy}>Save</button>
 		</div>
@@ -181,12 +182,16 @@
 		<h2>
 			Preview <span class="muted">({display.width} × {display.height}, on a 1080p screen)</span>
 		</h2>
-		<div class="screen" style="width:{PREVIEW_W}px;height:{previewH}px;background:{display.bg}">
+		<div
+			class="screen"
+			style="width:{PREVIEW_W}px;height:{previewH}px;background:{display.invertUi
+				? display.bg
+				: display.ui}"
+		>
 			<div
 				class="pframe"
-				style="{themeStyle(
-					display
-				)};width:{fw}px;height:{fh}px;left:{fleft}px;top:{ftop}px;box-shadow:0 0 8px 5px {display.bg}"
+				style="{themeStyle(display)};--pfs:{display.fontScale ??
+					1};width:{fw}px;height:{fh}px;left:{fleft}px;top:{ftop}px"
 			>
 				<div class="pcontent" class:duo={display.mode !== 'full'}>
 					<div class="pscene"></div>
@@ -386,7 +391,7 @@
 	.pframe {
 		position: absolute;
 		overflow: hidden;
-		background: var(--bg);
+		background: var(--ink);
 	}
 	.pscene {
 		position: absolute;
@@ -403,7 +408,7 @@
 	/* Matches the runtime: in duotone modes the whole content (monochrome-authored
 	   UI + scene) is colourized by the one filter. */
 	.pcontent.duo {
-		background: var(--bg);
+		background: var(--ink);
 		filter: url(#sgx-duotone-preview);
 	}
 	.pcrt {
@@ -418,7 +423,7 @@
 		right: 6%;
 		top: 6%;
 		padding: 2px 5px;
-		font-size: 8px;
+		font-size: calc(8px * var(--pfs, 1));
 		color: var(--ink);
 		background: var(--overlay-bg);
 		border: 1px solid var(--line);
@@ -432,7 +437,7 @@
 		bottom: 6%;
 		height: 34%;
 		padding: 3px 5px;
-		font-size: 9px;
+		font-size: calc(9px * var(--pfs, 1));
 		color: var(--ink);
 		background: var(--overlay-bg);
 		border: 1px solid var(--line);

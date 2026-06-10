@@ -152,6 +152,7 @@ export interface DisplaySettings {
 	uiOpacity: number; // 0..1 — opacity of the overlay panels (forced opaque in hard duotone)
 	crt: number; // 0..1 — CRT effect strength (scanlines, vignette, phosphor glow)
 	invertUi?: boolean; // swap bg/ui for the UI only (bright panels, dark text); scene art unchanged
+	fontScale?: number; // 0.5..2 — multiplies every font size in the game (kiosk tuning)
 }
 
 // ---------------------------------------------------------------------------

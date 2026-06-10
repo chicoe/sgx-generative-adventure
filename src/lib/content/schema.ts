@@ -114,7 +114,8 @@ export const displaySettingsSchema = z.object({
 	mode: z.enum(['full', 'gradient', 'duotone']),
 	uiOpacity: z.number().min(0).max(1),
 	crt: z.number().min(0).max(1),
-	invertUi: z.boolean().optional()
+	invertUi: z.boolean().optional(),
+	fontScale: z.number().min(0.5).max(2).optional()
 });
 
 export const buildMetaSchema = z.object({
