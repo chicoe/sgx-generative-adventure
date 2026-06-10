@@ -34,17 +34,31 @@ describe('theme', () => {
 		expect(v['--overlay-bg']).toBe('rgba(0, 0, 0, 0.5)');
 	});
 
-	it('forces panels opaque in hard duotone, honours opacity otherwise', () => {
-		expect(
-			themeVars({ ...DEFAULT_DISPLAY, bg: '#000000', uiOpacity: 0.5, mode: 'duotone' })[
-				'--overlay-bg'
-			]
-		).toBe('rgba(0, 0, 0, 1)');
-		expect(
-			themeVars({ ...DEFAULT_DISPLAY, bg: '#000000', uiOpacity: 0.5, mode: 'gradient' })[
-				'--overlay-bg'
-			]
-		).toBe('rgba(0, 0, 0, 0.5)');
+	it('collapses to pure two colours in hard duotone (opaque, no shades, no glow)', () => {
+		const pure = themeVars({
+			...DEFAULT_DISPLAY,
+			bg: '#000000',
+			ui: '#ffffff',
+			uiOpacity: 0.5,
+			mode: 'duotone'
+		});
+		expect(pure['--overlay-bg']).toBe('rgba(0, 0, 0, 1)'); // opaque
+		expect(pure['--panel']).toBe('#000000'); // no intermediate shade → bg
+		expect(pure['--line']).toBe('#ffffff'); // borders → ui
+		expect(pure['--ink-dim']).toBe('#ffffff'); // dim text → ui
+		expect(pure['--glow']).toBe('none');
+	});
+
+	it('keeps soft shades + opacity in gradient mode', () => {
+		const g = themeVars({ ...DEFAULT_DISPLAY, bg: '#000000', uiOpacity: 0.5, mode: 'gradient' });
+		expect(g['--overlay-bg']).toBe('rgba(0, 0, 0, 0.5)');
+		expect(g['--glow']).not.toBe('none');
+	});
+
+	it('invert UI swaps panel ↔ ink (scene colours handled separately)', () => {
+		const v = themeVars({ ...DEFAULT_DISPLAY, bg: '#000000', ui: '#ffffff', invertUi: true });
+		expect(v['--bg']).toBe('#ffffff'); // panels become the bright colour
+		expect(v['--ink']).toBe('#000000'); // text becomes the dark colour
 	});
 
 	it('CRT strength scales the glow and the scanline overlay', () => {
@@ -62,8 +76,9 @@ describe('theme', () => {
 		expect(t.b).toBe('0 1');
 	});
 
-	it('ships old-monitor presets defaulting to the gradient duotone', () => {
+	it('ships old-machine colour presets (valid hex pairs)', () => {
 		expect(COLOR_PRESETS.length).toBeGreaterThan(2);
-		expect(COLOR_PRESETS.some((p) => p.mode === 'gradient')).toBe(true);
+		const hex = /^#[0-9a-f]{6}$/i;
+		expect(COLOR_PRESETS.every((p) => hex.test(p.bg) && hex.test(p.ui))).toBe(true);
 	});
 });

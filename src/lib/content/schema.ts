@@ -113,7 +113,8 @@ export const displaySettingsSchema = z.object({
 	ui: z.string().regex(/^#[0-9a-fA-F]{6}$/),
 	mode: z.enum(['full', 'gradient', 'duotone']),
 	uiOpacity: z.number().min(0).max(1),
-	crt: z.number().min(0).max(1)
+	crt: z.number().min(0).max(1),
+	invertUi: z.boolean().optional()
 });
 
 export const buildMetaSchema = z.object({

@@ -76,7 +76,10 @@
 		const place = display.center
 			? `left:50%;top:50%;transform:translate(-50%,-50%) scale(${scale});transform-origin:center`
 			: `left:${display.marginLeft}px;top:${display.marginTop}px;transform:scale(${scale});transform-origin:top left`;
-		return `${themeStyle(display)};width:${display.width}px;height:${display.height}px;${place}`;
+		// A soft bg-coloured halo feathers the frame edge into the page so a kiosk
+		// bezel never shows a hard seam (the page background matches it).
+		const halo = `box-shadow:0 0 30px 18px ${display.bg}`;
+		return `${themeStyle(display)};width:${display.width}px;height:${display.height}px;${place};${halo}`;
 	});
 	// Refit when the resolution/placement changes (e.g. once the live build loads).
 	$effect(() => {
@@ -417,15 +420,16 @@
 <svelte:head><title>Adventure Engine — Play</title></svelte:head>
 <svelte:window onkeydown={onKeydown} onkeyup={onKeyup} onresize={computeScale} />
 
-<main class="letterbox">
+<main class="letterbox" style:background={display.bg}>
 	<!-- Duotone luminance map (dark → bg, light → ui) for the "old monitor" mode. -->
 	<svg width="0" height="0" aria-hidden="true" style="position:absolute">
 		<filter id="sgx-duotone" color-interpolation-filters="sRGB">
 			<feColorMatrix
+				color-interpolation-filters="sRGB"
 				type="matrix"
 				values="0.299 0.587 0.114 0 0 0.299 0.587 0.114 0 0 0.299 0.587 0.114 0 0 0 0 0 1 0"
 			/>
-			<feComponentTransfer>
+			<feComponentTransfer color-interpolation-filters="sRGB">
 				<feFuncR type={duoFunc} tableValues={duotone.r} />
 				<feFuncG type={duoFunc} tableValues={duotone.g} />
 				<feFuncB type={duoFunc} tableValues={duotone.b} />
@@ -465,7 +469,7 @@
 				</div>
 			</header>
 
-			<div class="stage">
+			<div class="stage" class:duo={display.mode !== 'full'}>
 				{#key game.currentSceneId}
 					{@const snap = findScene(build.scenes, game.currentSceneId)!}
 					<div class="scene-holder" in:fade={{ duration: 450 }} out:fade={{ duration: 300 }}>
@@ -561,16 +565,26 @@
 		overflow: hidden;
 		background: var(--bg);
 	}
-	/* Everything that should be colour-quantized lives in .content (scene art, text,
-	   borders, the status colours, the LED — all collapse onto the two palette
-	   colours like a real monochrome CRT). .crt is a SIBLING on top, so scanlines /
-	   vignette are applied AFTER the duotone map. (Heaviest path on the Pi.) */
 	.content {
 		position: absolute;
 		inset: 0;
 	}
-	.content.duo {
-		filter: url(#sgx-duotone);
+	/* In duotone modes the UI is drawn DIRECTLY in the palette (no filter — that
+	   mangles text/border anti-aliasing). The only non-palette colours are the
+	   semantic ones below; pull them onto the ink colour so everything is two-tone.
+	   Only the scene image (.stage) gets the luminance filter. */
+	.content.duo .statusbar .status,
+	.content.duo .statusbar .vitals.low {
+		color: var(--ink);
+		text-shadow: none;
+		animation: none;
+	}
+	.content.duo .led {
+		background: var(--ink);
+		box-shadow: none;
+	}
+	.content.duo .ph-tag {
+		color: var(--ink-dim);
 	}
 
 	/* Boot overlay shown while the active build loads — hides the placeholder
@@ -631,12 +645,17 @@
 		}
 	}
 
-	/* The scene fills the whole frame; the terminal floats over it. */
+	/* The scene fills the whole frame; the terminal floats over it. Only the scene
+	   ART is colour-quantized — 'gradient' uses a smooth luminance map, 'duotone' a
+	   hard two-colour threshold (the feFunc `type` switches on `duoFunc`). */
 	.stage {
 		position: absolute;
 		inset: 0;
 		overflow: hidden;
 		box-shadow: 0 0 60px rgba(255, 176, 0, 0.05) inset;
+	}
+	.stage.duo {
+		filter: url(#sgx-duotone);
 	}
 	.scene-holder {
 		position: absolute;
@@ -955,5 +974,9 @@
 		border: none;
 		outline: none;
 		padding: 0.2rem 0;
+	}
+	.composer input::placeholder {
+		color: var(--ink-dim);
+		opacity: 1;
 	}
 </style>

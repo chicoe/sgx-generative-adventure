@@ -151,6 +151,7 @@ export interface DisplaySettings {
 	mode: 'full' | 'gradient' | 'duotone';
 	uiOpacity: number; // 0..1 — opacity of the overlay panels (forced opaque in hard duotone)
 	crt: number; // 0..1 — CRT effect strength (scanlines, vignette, phosphor glow)
+	invertUi?: boolean; // swap bg/ui for the UI only (bright panels, dark text); scene art unchanged
 }
 
 // ---------------------------------------------------------------------------

@@ -14,25 +14,24 @@ export const DEFAULT_DISPLAY: DisplaySettings = {
 	ui: '#ffb000',
 	mode: 'full',
 	uiOpacity: 0.74,
-	crt: 1
+	crt: 1,
+	invertUi: false
 };
 
 export interface ColorPreset {
 	name: string;
 	bg: string;
 	ui: string;
-	mode: DisplaySettings['mode'];
 }
 
-// Old-monitor palettes. Amber matches the current skin; the rest emulate classic
-// monochrome CRTs (default to the gradient duotone, which looks like real phosphor).
+// Old-machine palettes ({ background, ui/ink }). A preset only sets the two
+// colours; the colour mode / CRT / etc. stay as the author has them.
 export const COLOR_PRESETS: ColorPreset[] = [
-	{ name: 'Amber (current)', bg: '#0a0805', ui: '#ffb000', mode: 'full' },
-	{ name: 'Amber mono', bg: '#170d00', ui: '#ffb000', mode: 'gradient' },
-	{ name: 'Green phosphor', bg: '#021206', ui: '#2bff66', mode: 'gradient' },
-	{ name: 'IBM green', bg: '#001a00', ui: '#33ff00', mode: 'gradient' },
-	{ name: 'Blue CRT', bg: '#000a16', ui: '#46b4ff', mode: 'gradient' },
-	{ name: 'Paper white', bg: '#0c0c0c', ui: '#eaeaea', mode: 'gradient' }
+	{ name: 'C64', bg: '#3a1bf2', ui: '#a8b7f8' },
+	{ name: 'T5100', bg: '#624129', ui: '#cd6606' },
+	{ name: 'Apple2', bg: '#2f3642', ui: '#99eea6' },
+	{ name: 'XeroxAlto', bg: '#0c0c0c', ui: '#eaeaea' },
+	{ name: 'Custom1', bg: '#1d0f44', ui: '#f44e38' }
 ];
 
 // --- colour helpers ---------------------------------------------------------
@@ -74,20 +73,24 @@ export function duotoneTable(bg: string, ui: string): { r: string; g: string; b:
 
 /** CSS custom properties that recolour the whole UI from the two chosen colours. */
 export function themeVars(d: DisplaySettings): Record<string, string> {
-	const { bg, ui } = d;
 	const crt = d.crt ?? 1;
-	// Hard duotone is two solid colours only — force the overlay panels opaque.
-	const overlayAlpha = d.mode === 'duotone' ? 1 : d.uiOpacity;
+	// Hard duotone ('duotone') is two solid colours only: collapse every shade to
+	// bg or ui, opaque panels, no glow. 'full' / 'gradient' keep the soft palette.
+	const pure = d.mode === 'duotone';
+	// "Invert UI" swaps panel ↔ ink for a bright-panel/dark-text terminal, WITHOUT
+	// touching the scene art (the scene filter still uses the real bg/ui).
+	const a = d.invertUi ? d.ui : d.bg; // panel / background colour
+	const b = d.invertUi ? d.bg : d.ui; // ink / foreground colour
 	return {
-		'--bg': bg,
-		'--panel': mix(bg, ui, 0.06),
-		'--line': mix(bg, ui, 0.28),
-		'--ink': ui,
-		'--ink-dim': mix(bg, ui, 0.6),
-		'--accent': mix(ui, '#ffffff', 0.25),
-		'--amber': ui,
-		'--glow': `0 0 ${(6 * crt).toFixed(1)}px ${rgba(ui, 0.4 * crt)}`,
-		'--overlay-bg': rgba(bg, overlayAlpha)
+		'--bg': a,
+		'--panel': pure ? a : mix(a, b, 0.06),
+		'--line': pure ? b : mix(a, b, 0.28),
+		'--ink': b,
+		'--ink-dim': pure ? b : mix(a, b, 0.6),
+		'--accent': pure ? b : mix(b, '#ffffff', 0.25),
+		'--amber': b,
+		'--glow': pure ? 'none' : `0 0 ${(6 * crt).toFixed(1)}px ${rgba(b, 0.4 * crt)}`,
+		'--overlay-bg': rgba(a, pure ? 1 : d.uiOpacity)
 	};
 }
 
