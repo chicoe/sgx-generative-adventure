@@ -15,6 +15,7 @@ export interface SceneContext {
 	name?: string;
 	prompt?: string; // author's scene description + instructions for the computer
 	exits?: { label: string; toSceneId: string }[];
+	lockedExits?: { label: string; requires: string[] }[]; // sealed routes (info only)
 	inventory?: string[];
 	giveable?: { label: string; itemId: string }[]; // items the computer may hand over here
 }
@@ -23,6 +24,11 @@ function sceneSection(scene: SceneContext): string {
 	const exits = scene.exits?.length
 		? scene.exits.map((e) => `- ${e.label} (leads to scene "${e.toSceneId}")`).join('\n')
 		: '- (none)';
+	const sealed = scene.lockedExits?.length
+		? scene.lockedExits
+				.map((e) => `- ${e.label} — sealed; opens with: ${e.requires.join(' or ')}`)
+				.join('\n')
+		: '';
 	const giveable = scene.giveable?.length
 		? scene.giveable.map((g) => `- ${g.label} (item "${g.itemId}")`).join('\n')
 		: '- (none)';
@@ -31,6 +37,8 @@ function sceneSection(scene: SceneContext): string {
 		scene.prompt ? `SCENE NOTES: ${scene.prompt}` : '',
 		'AVAILABLE EXITS:',
 		exits,
+		sealed ? 'SEALED ROUTES (locked — you can NOT take the player through these):' : '',
+		sealed,
 		'ITEMS PRESENT HERE THAT YOU CAN GIVE THE PLAYER:',
 		giveable,
 		`PLAYER INVENTORY: ${scene.inventory?.length ? scene.inventory.join(', ') : '(empty)'}`
@@ -71,6 +79,9 @@ export function buildPrompt(
 		'- You may ONLY move the player through the exits listed under AVAILABLE EXITS. Never mention,',
 		'  offer, or imply you can go anywhere that is not in that list. If the player asks for a place',
 		'  that is not an available exit, say in character that there is no route there.',
+		'- SEALED ROUTES exist but cannot be taken (there is no outcome for them). If the player asks',
+		'  about one, acknowledge it is sealed and tell them what would open it. Never pretend to take',
+		'  them through a sealed route.',
 		'- If SCENE NOTES say an exit or action requires an item (e.g. a key, a lever, a password), only',
 		'  allow it when that item is listed in PLAYER INVENTORY; otherwise stay in character and explain',
 		'  what is needed. Do not pretend the player has something they do not.',

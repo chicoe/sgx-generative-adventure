@@ -40,6 +40,18 @@ describe('buildPrompt', () => {
 		expect(buildPrompt(behaviour, [], 'x').userPrompt).toContain('(no prior turns)');
 	});
 
+	it('describes sealed routes with what opens them (info only)', () => {
+		const { systemInstruction } = buildPrompt(behaviour, [], 'hi', {
+			name: 'Cryo Pod',
+			exits: [{ label: 'corridor', toSceneId: 'corridor' }],
+			lockedExits: [{ label: 'maintenance hatch', requires: ['Keycard', 'Crowbar'] }]
+		});
+		expect(systemInstruction).toContain('SEALED ROUTES');
+		expect(systemInstruction).toContain(
+			'maintenance hatch — sealed; opens with: Keycard or Crowbar'
+		);
+	});
+
 	it('lists giveable items as present things the computer may hand over', () => {
 		const { systemInstruction } = buildPrompt(behaviour, [], 'hi', {
 			name: 'Cryo Pod',

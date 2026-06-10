@@ -2,7 +2,7 @@
 	import { onMount } from 'svelte';
 	import { page } from '$app/state';
 	import EffectsEditor from '$lib/components/editor/EffectsEditor.svelte';
-	import { loadDraft, saveScene, deleteScene } from '$lib/content/draft';
+	import { loadDraft, saveScene, deleteSceneAndLinks } from '$lib/content/draft';
 	import { draftStatus } from '$lib/content/draftStatus.svelte';
 	import { uploadImage } from '$lib/firebase/storage';
 	import type { Scene } from '$lib/engine/types';
@@ -52,6 +52,47 @@
 		current = { id: '', name: '', layers: [], hotspots: [], exits: [], onEnter: [], filter: {} };
 	}
 
+	// Duplicate the selected scene wholesale: every option, layers, effects, and
+	// its links — exits AND entrances (every exit on another scene pointing at the
+	// original gets a sibling pointing at the copy, same lock/one-way settings),
+	// so the copy is reachable exactly like the original. Fresh ids throughout.
+	async function duplicateScene() {
+		if (!current?.id) return;
+		const srcId = current.id;
+		const copy = $state.snapshot(current) as Scene;
+		let id = `${copy.id}-copy`;
+		for (let n = 2; scenes.some((s) => s.id === id); n++) id = `${copy.id}-copy-${n}`;
+		copy.id = id;
+		copy.name = copy.name ? `${copy.name} (copy)` : id;
+		copy.exits = copy.exits.map((x, i) => ({ ...x, id: `exit-${Date.now()}-${i}` }));
+		busy = true;
+		message = '';
+		try {
+			await saveScene(copy);
+			for (const s of scenes) {
+				if (s.id === srcId) continue;
+				const into = s.exits.filter((x) => x.toSceneId === srcId);
+				if (!into.length) continue;
+				const mirrored = into.map((x, i) => ({
+					...x,
+					id: `exit-${Date.now()}-in-${i}`,
+					toSceneId: id,
+					label: copy.name
+				}));
+				await saveScene({ ...$state.snapshot(s), exits: [...s.exits, ...mirrored] });
+			}
+			draftStatus.markDirty();
+			await refresh();
+			const saved = scenes.find((s) => s.id === id);
+			if (saved) select(saved);
+			message = `Duplicated as "${id}" (links mirrored).`;
+		} catch (e) {
+			message = e instanceof Error ? e.message : String(e);
+		} finally {
+			busy = false;
+		}
+	}
+
 	async function save() {
 		if (!current) return;
 		const id = current.id.trim();
@@ -73,7 +114,7 @@
 		if (!current?.id) return;
 		busy = true;
 		try {
-			await deleteScene(current.id);
+			await deleteSceneAndLinks(current.id);
 			draftStatus.markDirty();
 			current = null;
 			await refresh();
@@ -151,6 +192,12 @@
 		{/each}
 	</select>
 	<button type="button" onclick={newScene}>+ New scene</button>
+	<button
+		type="button"
+		title="Copy the selected scene — everything including its links — under a new id"
+		onclick={duplicateScene}
+		disabled={busy || !current?.id}>⧉ Duplicate scene</button
+	>
 </div>
 
 {#if current}

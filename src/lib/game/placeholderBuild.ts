@@ -48,13 +48,9 @@ export const placeholderBuild: Build = {
 				'[ placeholder scene prompt for Scene A — describe the location and tell the computer how to behave here; the LLM also sees the exits and the player inventory ]',
 			// Demonstrates the giveable-items capability (rolled per run); placeholder item.
 			giveableItems: [{ itemId: 'placeholder-item', chance: 0.8 }],
-			// Demonstrates the FilterSpec capability; not a final art grade.
-			filter: { css: 'contrast(1.03) brightness(1.01)' },
-			layers: [
-				{ id: 'back', imagePath: 'placeholder/back-a.svg', z: 0, parallaxFactor: 0.08 },
-				{ id: 'mid', imagePath: 'placeholder/mid.svg', z: 1, parallaxFactor: 0.4 },
-				{ id: 'fore', imagePath: 'placeholder/fore.svg', z: 2, parallaxFactor: 0.85 }
-			],
+			// No layers on purpose: the runtime shows its NO SIGNAL static for art-less
+			// scenes — the old "SCENE A" placeholder art must never reach a player.
+			layers: [],
 			hotspots: [
 				{
 					id: 'hotspot-dialogue',
@@ -74,12 +70,7 @@ export const placeholderBuild: Build = {
 			name: 'Scene B (placeholder)',
 			introText: '[ placeholder intro text for Scene B — replace via editor ]',
 			prompt: '[ placeholder scene prompt for Scene B — replace via editor ]',
-			filter: { css: 'contrast(1.03) brightness(1.01)' },
-			layers: [
-				{ id: 'back', imagePath: 'placeholder/back-b.svg', z: 0, parallaxFactor: 0.08 },
-				{ id: 'mid', imagePath: 'placeholder/mid.svg', z: 1, parallaxFactor: 0.4 },
-				{ id: 'fore', imagePath: 'placeholder/fore.svg', z: 2, parallaxFactor: 0.85 }
-			],
+			layers: [],
 			hotspots: [
 				{
 					id: 'hotspot-dialogue',

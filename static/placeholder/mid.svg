@@ -1,7 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900" preserveAspectRatio="xMidYMid slice" font-family="monospace">
-  <g stroke="#5a6b50" stroke-width="3" fill="none" stroke-dasharray="18 12">
-    <rect x="430" y="250" width="740" height="420" rx="12" />
-  </g>
-  <text x="800" y="475" fill="#7c8a72" font-size="44" text-anchor="middle" letter-spacing="3">MIDGROUND LAYER</text>
-  <text x="800" y="525" fill="#5f6b58" font-size="26" text-anchor="middle" letter-spacing="2">z1 · parallax · placeholder</text>
-</svg>

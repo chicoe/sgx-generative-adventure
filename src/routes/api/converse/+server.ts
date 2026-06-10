@@ -43,6 +43,11 @@ const requestSchema = z.object({
 			name: z.string().optional(),
 			prompt: z.string().optional(),
 			exits: z.array(z.object({ label: z.string(), toSceneId: z.string() })).optional(),
+			// Info-only: sealed routes the model may TALK about but can never take
+			// (no outcome is synthesized for them).
+			lockedExits: z
+				.array(z.object({ label: z.string(), requires: z.array(z.string()) }))
+				.optional(),
 			inventory: z.array(z.string()).optional(),
 			giveable: z.array(z.object({ label: z.string(), itemId: z.string() })).optional()
 		})

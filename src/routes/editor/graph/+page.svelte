@@ -18,6 +18,7 @@
 	const nodeTypes = { scene: SceneNode };
 
 	let scenes = $state<Scene[]>([]);
+	let itemIds = $state<string[]>([]);
 	let startSceneId = $state('');
 	let positions = $state<GraphPositions>({});
 	let nodes = $state.raw<Node[]>([]);
@@ -30,6 +31,8 @@
 		from: string;
 		to: string;
 		label: string;
+		oneWay: boolean;
+		requiredItems: string[];
 	} | null>(null);
 
 	const imgUrl = (p: string) =>
@@ -55,23 +58,55 @@
 		edges = scenes.flatMap((s) =>
 			s.exits
 				.filter((x) => x.toSceneId)
-				.map((x) => ({
-					id: `${s.id}::${x.id}`,
-					source: s.id,
-					target: x.toSceneId,
-					label: x.label || undefined,
-					style: 'stroke: #38e08a;',
-					markerEnd: { type: MarkerType.ArrowClosed, color: '#38e08a', width: 18, height: 18 },
-					data: { sceneId: s.id, exitId: x.id }
-				}))
+				.map((x) => {
+					const locked = (x.requiredItems ?? []).length > 0;
+					return {
+						id: `${s.id}::${x.id}`,
+						source: s.id,
+						target: x.toSceneId,
+						label: (x.label || '') + (locked ? ' 🔒' : '') || undefined,
+						// dashed = locked behind items; arrows on both ends = two-way door
+						style: `stroke: #38e08a;${locked ? ' stroke-dasharray: 7 4;' : ''}`,
+						markerEnd: { type: MarkerType.ArrowClosed, color: '#38e08a', width: 18, height: 18 },
+						...(x.oneWay
+							? {}
+							: {
+									markerStart: {
+										type: MarkerType.ArrowClosed,
+										color: '#38e08a',
+										width: 18,
+										height: 18
+									}
+								}),
+						data: { sceneId: s.id, exitId: x.id }
+					};
+				})
 		);
 	}
 
 	async function refresh() {
 		const [d, pos] = await Promise.all([loadDraft(), loadGraphPositions()]);
 		scenes = d?.scenes ?? [];
+		itemIds = (d?.items ?? []).map((i) => i.id);
 		startSceneId = d?.meta.startSceneId ?? '';
 		positions = pos;
+		// Self-repair: scrub links pointing at scenes that no longer exist (left
+		// behind by older deletes — they'd block publish and are invisible here).
+		const ids = new Set(scenes.map((s) => s.id));
+		const dangling = scenes.filter((s) =>
+			s.exits.some((x) => x.toSceneId && !ids.has(x.toSceneId))
+		);
+		if (dangling.length) {
+			let n = 0;
+			for (const s of dangling) {
+				const kept = s.exits.filter((x) => !x.toSceneId || ids.has(x.toSceneId));
+				n += s.exits.length - kept.length;
+				await saveScene({ ...$state.snapshot(s), exits: kept });
+			}
+			const d2 = await loadDraft();
+			scenes = d2?.scenes ?? [];
+			message = `removed ${n} dangling link(s) to deleted scenes`;
+		}
 		buildGraph();
 	}
 	onMount(() => refresh().catch((e) => (message = String(e))));
@@ -119,8 +154,16 @@
 			exitId: exit.id,
 			from: scene.id,
 			to: exit.toSceneId,
-			label: exit.label
+			label: exit.label,
+			oneWay: !!exit.oneWay,
+			requiredItems: [...(exit.requiredItems ?? [])]
 		};
+	}
+	function toggleRequiredItem(id: string) {
+		if (!selectedExit) return;
+		selectedExit.requiredItems = selectedExit.requiredItems.includes(id)
+			? selectedExit.requiredItems.filter((x) => x !== id)
+			: [...selectedExit.requiredItems, id];
 	}
 
 	async function commitExit(mutate: (exits: Scene['exits']) => Scene['exits'], note: string) {
@@ -136,13 +179,22 @@
 			message = e instanceof Error ? e.message : String(e);
 		}
 	}
-	const saveExitLabel = () =>
+	const saveExit = () =>
 		commitExit(
 			(exits) =>
 				exits.map((x) =>
-					x.id === selectedExit!.exitId ? { ...x, label: selectedExit!.label } : x
+					x.id === selectedExit!.exitId
+						? {
+								...x,
+								label: selectedExit!.label,
+								oneWay: selectedExit!.oneWay || undefined,
+								requiredItems: selectedExit!.requiredItems.length
+									? selectedExit!.requiredItems
+									: undefined
+							}
+						: x
 				),
-			'Exit label updated.'
+			'Link updated.'
 		);
 	const removeSelectedExit = () =>
 		commitExit((exits) => exits.filter((x) => x.id !== selectedExit!.exitId), 'Exit removed.');
@@ -190,18 +242,49 @@
 	{#if message}<span class="msg">{message}</span>{/if}
 </div>
 <p class="hint">
-	drag from a node's <span class="k-exit">exit</span> handle (green, bottom) to another node's
-	<span class="k-enter">entrance</span> handle (blue, top) — arrows point the way · click a link to rename/remove
-	· drag nodes to arrange (saved) · click a node to edit
+	drag between nodes to connect — links are <strong>two-way doors</strong> by default (arrows on both
+	ends) · click a link to edit it (label, one-way, required items 🔒) · drag nodes to arrange (saved)
+	· click a node to edit
 </p>
 
 {#if selectedExit}
 	<div class="edge-editor">
-		<span class="route">{selectedExit.from} → {selectedExit.to}</span>
-		<input placeholder="exit label" bind:value={selectedExit.label} />
-		<button type="button" onclick={saveExitLabel}>Save label</button>
-		<button type="button" class="del" onclick={removeSelectedExit}>Remove exit</button>
-		<button type="button" class="x" onclick={() => (selectedExit = null)}>✕</button>
+		<div class="row1">
+			<span class="route"
+				>{selectedExit.from}
+				{selectedExit.oneWay ? '→' : '↔'}
+				{selectedExit.to}</span
+			>
+			<input placeholder="exit label" bind:value={selectedExit.label} />
+			<label class="chk"><input type="checkbox" bind:checked={selectedExit.oneWay} /> one-way</label
+			>
+			<button type="button" onclick={saveExit}>Save</button>
+			<button type="button" class="del" onclick={removeSelectedExit}>Remove link</button>
+			<button type="button" class="x" onclick={() => (selectedExit = null)}>✕</button>
+		</div>
+		<div class="row2">
+			<span class="lbl">🔒 locked — opens with <strong>any</strong> of:</span>
+			{#each selectedExit.requiredItems as id (id)}
+				<span class="chip"
+					>{id}<button type="button" class="chip-x" onclick={() => toggleRequiredItem(id)}>✕</button
+					></span
+				>
+			{:else}
+				<span class="lbl">(none — door is open)</span>
+			{/each}
+			<select
+				class="additem"
+				onchange={(e) => {
+					if (e.currentTarget.value) toggleRequiredItem(e.currentTarget.value);
+					e.currentTarget.value = '';
+				}}
+			>
+				<option value="">+ add item…</option>
+				{#each itemIds.filter((i) => !selectedExit!.requiredItems.includes(i)) as id (id)}
+					<option value={id}>{id}</option>
+				{/each}
+			</select>
+		</div>
 	</div>
 {/if}
 
@@ -261,15 +344,9 @@
 		font-size: 0.8rem;
 		color: var(--ink-dim);
 	}
-	.k-exit {
-		color: #38e08a;
-	}
-	.k-enter {
-		color: #7aa2f7;
-	}
 	.edge-editor {
 		display: flex;
-		align-items: center;
+		flex-direction: column;
 		gap: 0.5rem;
 		margin-top: 0.5rem;
 		padding: 0.4rem 0.6rem;
@@ -277,12 +354,57 @@
 		background: var(--panel);
 		font-size: 0.85rem;
 	}
+	.edge-editor .row1,
+	.edge-editor .row2 {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		flex-wrap: wrap;
+	}
 	.edge-editor .route {
 		color: var(--ink-dim);
 		white-space: nowrap;
 	}
-	.edge-editor input {
+	.edge-editor .lbl {
+		color: var(--ink-dim);
+		font-size: 0.8rem;
+	}
+	.edge-editor .chk {
+		display: flex;
+		align-items: center;
+		gap: 0.3rem;
+		white-space: nowrap;
+	}
+	.edge-editor .chip {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.25rem;
+		padding: 0.1rem 0.2rem 0.1rem 0.5rem;
+		border: 1px solid var(--line);
+		background: #0c0e11;
+		white-space: nowrap;
+	}
+	.edge-editor .chip-x {
+		border: none;
+		background: none;
+		color: var(--ink-dim);
+		cursor: pointer;
+		padding: 0 0.25rem;
+	}
+	.edge-editor .chip-x:hover {
+		color: var(--accent);
+	}
+	.edge-editor .additem {
+		font: inherit;
+		font-size: 0.8rem;
+		color: var(--ink);
+		background: #0c0e11;
+		border: 1px solid var(--line);
+		padding: 0.2rem 0.4rem;
+	}
+	.edge-editor input:not([type]) {
 		flex: 1;
+		min-width: 10rem;
 		font: inherit;
 		color: var(--ink);
 		background: #0c0e11;

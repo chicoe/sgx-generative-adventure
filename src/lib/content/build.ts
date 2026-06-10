@@ -82,8 +82,11 @@ function validateReferences(draft: DraftContent): string[] {
 	}
 
 	for (const scene of draft.scenes) {
-		for (const exit of scene.exits)
+		for (const exit of scene.exits) {
 			sceneRef(exit.toSceneId, `scene "${scene.id}" exit "${exit.id}"`);
+			for (const id of exit.requiredItems ?? [])
+				itemRef(id, `scene "${scene.id}" exit "${exit.id}" requiredItems`);
+		}
 		for (const h of scene.hotspots) {
 			sceneRef(h.goToSceneId, `scene "${scene.id}" hotspot "${h.id}"`);
 			if (h.behaviourId && !behaviourIds.has(h.behaviourId)) {

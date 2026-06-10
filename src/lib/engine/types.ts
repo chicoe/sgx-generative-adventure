@@ -45,11 +45,15 @@ export interface Hotspot {
 	condition?: Condition; // only available if met
 }
 
+// A link between rooms is a DOOR: bidirectional by default (the player can
+// always go back), optionally one-way, optionally locked behind items.
 export interface Exit {
 	id: string;
 	toSceneId: string;
 	label: string;
 	condition?: Condition;
+	oneWay?: boolean; // default false — traversable in both directions
+	requiredItems?: string[]; // locked until the player holds ANY ONE of these
 }
 
 // An item the computer MAY hand the player while in this scene (only here), if

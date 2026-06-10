@@ -59,6 +59,17 @@ describe('assembleBuild', () => {
 		expect(assembleBuild(bad, 1, 'now').errors.join(' ')).toContain('ghostItem');
 	});
 
+	it('flags an exit requiredItems entry referencing an unknown item', () => {
+		const bad: DraftContent = {
+			...validDraft,
+			scenes: [
+				scene({ exits: [{ id: 'e', toSceneId: 'b', label: 'door', requiredItems: ['ghostKey'] }] }),
+				scene({ id: 'b' })
+			]
+		};
+		expect(assembleBuild(bad, 1, 'now').errors.join(' ')).toContain('ghostKey');
+	});
+
 	it('flags a giveable item referencing an unknown item', () => {
 		const bad: DraftContent = {
 			...validDraft,

@@ -26,6 +26,49 @@ export function availableExits(scene: Scene, state: GameState): Exit[] {
 	return scene.exits.filter((exit) => evaluate(exit.condition, state));
 }
 
+/** An Exit seen from a room, with its lock state resolved against the player. */
+export interface Door extends Exit {
+	locked: boolean; // requiredItems not all in the inventory yet
+}
+
+// A door with requiredItems opens with ANY one of them (OR semantics).
+const holdsAny = (items: string[] | undefined, state: GameState) =>
+	!items?.length || items.some((id) => state.inventory.includes(id));
+
+/**
+ * All doors visible from a scene. A link is a DOOR: bidirectional by default
+ * (the reverse of any non-`oneWay` exit leading in counts too, so the player
+ * can always go back), `condition` gates visibility, and `requiredItems` lock
+ * it — in both directions — until the player holds AT LEAST ONE of them.
+ * Reverse doors are labelled with the destination room's name and deduped
+ * against authored exits.
+ */
+export function availableDoors(scenes: Scene[], scene: Scene, state: GameState): Door[] {
+	const doors: Door[] = availableExits(scene, state).map((x) => ({
+		...x,
+		locked: !holdsAny(x.requiredItems, state)
+	}));
+	const have = new Set(doors.map((d) => d.toSceneId));
+	for (const other of scenes) {
+		if (other.id === scene.id || have.has(other.id)) continue;
+		const back = other.exits.find(
+			(x) => !x.oneWay && x.toSceneId === scene.id && evaluate(x.condition, state)
+		);
+		if (back) {
+			have.add(other.id);
+			doors.push({
+				id: `return-${other.id}`,
+				toSceneId: other.id,
+				label: other.name || other.id,
+				condition: back.condition,
+				requiredItems: back.requiredItems,
+				locked: !holdsAny(back.requiredItems, state)
+			});
+		}
+	}
+	return doors;
+}
+
 /** Hotspots whose condition is currently met. */
 export function availableHotspots(scene: Scene, state: GameState): Hotspot[] {
 	return scene.hotspots.filter((hotspot) => evaluate(hotspot.condition, state));

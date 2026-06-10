@@ -4,7 +4,7 @@
 	import SceneRenderer from '$lib/components/SceneRenderer.svelte';
 	import { placeholderBuild } from '$lib/game/placeholderBuild';
 	import { startGame } from '$lib/engine/state';
-	import { availableExits, findScene, rollGiveableItems } from '$lib/engine/graph';
+	import { availableDoors, findScene, rollGiveableItems } from '$lib/engine/graph';
 	import { applyEffects } from '$lib/engine/effects';
 	import { loadActiveBuild } from '$lib/content/loader';
 	import { doc, onSnapshot } from 'firebase/firestore';
@@ -49,9 +49,11 @@
 	let buildSource = $state<BuildSource>('placeholder');
 	// The page seeds itself with the placeholder build so SSR/first paint has
 	// something to render, then swaps in the live build in onMount. `loading`
-	// holds a boot overlay over the frame during that swap, so the placeholder
-	// content never flashes before the real build arrives.
+	// holds a boot overlay over the frame during that swap. If the real build
+	// can't be loaded (network error / nothing published), `failed` shows a
+	// discrete black "please restart" page — placeholder content never runs.
 	let loading = $state(true);
+	let failed = $state(false);
 	let game = $state<GameState>(startGame(placeholderBuild).state);
 
 	type Line = {
@@ -166,6 +168,53 @@
 		return -1;
 	});
 
+	// Top-view map: the current room centred, with every connected room placed
+	// around it on a ring (positions are computed — nothing is authored per
+	// scene). Doors are bidirectional by default; locked doors show sealed.
+	const mapNodes = $derived.by(() => {
+		const seen: Record<string, { id: string; visited: boolean; locked: boolean }> = {};
+		for (const d of availableDoors(build.scenes, scene, game)) {
+			if (d.toSceneId === scene.id) continue;
+			const prev = seen[d.toSceneId];
+			seen[d.toSceneId] = {
+				id: d.toSceneId,
+				visited: game.visitedScenes.includes(d.toSceneId),
+				locked: prev ? prev.locked && d.locked : d.locked // any open door wins
+			};
+		}
+		const conns = Object.values(seen);
+		// Max 4 boxes. Every connection shows individually (each unexplored route is
+		// its own "?" box). Priority when slicing: open doors before locked, visited
+		// before unknown — but if any unknown exists, at least one "?" is guaranteed
+		// a slot so unexplored routes are never hidden entirely.
+		const sorted = conns.sort(
+			(a, b) =>
+				Number(a.locked) - Number(b.locked) ||
+				Number(!a.visited) - Number(!b.visited) ||
+				a.id.localeCompare(b.id)
+		);
+		const shown = sorted.slice(0, 4);
+		if (sorted.some((c) => !c.visited) && !shown.some((c) => !c.visited)) {
+			shown[shown.length - 1] = sorted.find((c) => !c.visited)!;
+		}
+		return shown.map((c, i) => {
+			const a = -Math.PI / 2 + (i * 2 * Math.PI) / shown.length;
+			const sin = Math.sin(a);
+			return {
+				...c,
+				label: c.visited ? findScene(build.scenes, c.id)?.name || c.id : '?',
+				x: +(110 + 78 * Math.cos(a)).toFixed(1),
+				y: +(66 + 46 * sin).toFixed(1),
+				// Label above the box only for top-side nodes; below otherwise — never
+				// across the centre box.
+				labelDy: sin < -0.5 ? -11 : 17
+			};
+		});
+	});
+	const shortName = (s: string, n: number) => (s.length > n ? s.slice(0, n - 1) + '…' : s);
+	// Hint that the current room has unclaimed (rolled-present) items.
+	const itemsHere = $derived(presentGiveables.some((id) => !game.inventory.includes(id)));
+
 	function push(who: Line['who'], text?: string | null) {
 		if (!text) return;
 		// Player echoes and system notes appear instantly; the computer & narration
@@ -199,10 +248,20 @@
 	}
 	function sceneContextFor(s: Scene, state: GameState) {
 		const owned = new Set(state.inventory);
+		const doors = availableDoors(build.scenes, s, state);
 		return {
 			name: s.name,
 			prompt: s.prompt,
-			exits: availableExits(s, state).map((x) => ({ label: x.label, toSceneId: x.toSceneId })),
+			// Doors are bidirectional by default. LOCKED doors never appear in `exits`
+			// (no outcome is synthesized — the model can't move the player through
+			// one), but they're described in `lockedExits` so the computer can talk
+			// about the sealed route and what would open it.
+			exits: doors
+				.filter((d) => !d.locked)
+				.map((x) => ({ label: x.label, toSceneId: x.toSceneId })),
+			lockedExits: doors
+				.filter((d) => d.locked)
+				.map((d) => ({ label: d.label, requires: (d.requiredItems ?? []).map(itemName) })),
 			inventory: state.inventory,
 			// Only offer items present this run that the player doesn't already hold.
 			giveable: presentGiveables
@@ -414,31 +473,44 @@
 		computeScale();
 		const clockId = setInterval(() => (clockNow = Date.now()), 1000);
 		let unsubLive: (() => void) | undefined;
+		// Live-update: when the editor publishes a different version, reload the
+		// whole page so the kiosk picks up new content (and any new app code) —
+		// this is also how a failed kiosk recovers without a hand. The
+		// sessionStorage guard reloads at most once per target build, so a build
+		// that keeps failing to load can never cause a reload loop.
+		const watchLive = (runningId: string | null) => {
+			if (!reloadOnPublish) return;
+			unsubLive = onSnapshot(doc(db(), 'config', 'current'), (snap) => {
+				const liveId = snap.data()?.activeBuildId as string | undefined;
+				if (!liveId || liveId === runningId) return;
+				const KEY = 'sgx-reloaded-for';
+				if (sessionStorage.getItem(KEY) === liveId) return;
+				sessionStorage.setItem(KEY, liveId);
+				location.reload();
+			});
+		};
 		loadBuild()
 			.then(({ build: loaded, source }) => {
+				if (source === 'placeholder') {
+					// Live build unavailable (network error / nothing published): never
+					// run the placeholder — show the discrete fail page instead.
+					failed = true;
+					loading = false;
+					watchLive(null);
+					return;
+				}
 				buildSource = source;
 				build = loaded;
 				initFrom(loaded);
 				loading = false; // reveal the resolved build
 				afterEnter();
-
-				// Live-update: when the editor publishes a different version, reload the
-				// whole page so the kiosk picks up new content (and any new app code).
-				// The sessionStorage guard reloads at most once per target build, so a
-				// build that keeps failing to load can never cause a reload loop.
-				if (reloadOnPublish) {
-					const runningId = source === 'firestore' ? `build-${loaded.meta.version}` : null;
-					unsubLive = onSnapshot(doc(db(), 'config', 'current'), (snap) => {
-						const liveId = snap.data()?.activeBuildId as string | undefined;
-						if (!liveId || liveId === runningId) return;
-						const KEY = 'sgx-reloaded-for';
-						if (sessionStorage.getItem(KEY) === liveId) return;
-						sessionStorage.setItem(KEY, liveId);
-						location.reload();
-					});
-				}
+				watchLive(source === 'firestore' ? `build-${loaded.meta.version}` : null);
 			})
-			.catch(() => (loading = false));
+			.catch(() => {
+				failed = true;
+				loading = false;
+				watchLive(null);
+			});
 
 		let raf = 0;
 		let t = 0;
@@ -464,151 +536,217 @@
 <svelte:head><title>Adventure Engine — Play</title></svelte:head>
 <svelte:window onkeydown={onKeydown} onkeyup={onKeyup} onresize={computeScale} />
 
-<main class="letterbox" style:background={pageBg}>
-	<!-- Duotone luminance map (dark → bg, light → ui) for the "old monitor" mode. -->
-	<svg width="0" height="0" aria-hidden="true" style="position:absolute">
-		<filter id="sgx-duotone" color-interpolation-filters="sRGB">
-			<feColorMatrix
-				color-interpolation-filters="sRGB"
-				type="matrix"
-				values="0.299 0.587 0.114 0 0 0.299 0.587 0.114 0 0 0.299 0.587 0.114 0 0 0 0 0 1 0"
-			/>
-			<feComponentTransfer color-interpolation-filters="sRGB">
-				<feFuncR type={duoFunc} tableValues={duotone.r} />
-				<feFuncG type={duoFunc} tableValues={duotone.g} />
-				<feFuncB type={duoFunc} tableValues={duotone.b} />
-			</feComponentTransfer>
-		</filter>
-	</svg>
-	<div class="frame" style={frameStyle}>
-		<div class="content" class:duo={display.mode !== 'full'}>
-			<header class="statusbar">
-				<div class="grp">
-					<span class="sys">ARG-OS</span>
-					<span class="sep">·</span>
-					{#if buildSource === 'firestore'}
-						<span class="bld" title="content build (builds/build-{build.meta.version})"
-							>BLD {build.meta.version}</span
-						>
-					{:else}
-						<span class="bld" class:draft={buildSource === 'draft'}
-							>{buildSource === 'draft' ? 'DRAFT' : 'PLACEHOLDER'}</span
-						>
-					{/if}
-					<span class="sep">·</span>
-					<span class="clock">{alienTime}</span>
-				</div>
-				<div class="grp center">
-					<span class="lbl">LOC</span>
-					<span class="room">{scene.name}</span>
-				</div>
-				<div class="grp right">
-					<span class="status">⚠ CRITICAL</span>
-					<span class="vitals" class:low={vitalsPct <= 25}>
-						VITALS {vitalsPct <= 0 ? 'ERROR' : `${Math.round(vitalsPct)}%`}
-					</span>
-					<span
-						class="led {buildSource}"
-						title={buildSource === 'firestore'
-							? 'Live build (Firestore)'
-							: buildSource === 'draft'
-								? 'Draft — unpublished'
-								: 'Placeholder build'}
-					></span>
-				</div>
-			</header>
-
-			<div class="mid">
-				<aside class="sidebar">
-					<div class="inventory" aria-label="inventory">
-						{#each Array.from({ length: 9 }) as _slot, idx (idx)}
-							{@const item = inventoryItems[idx]}
-							<button
-								type="button"
-								class="slot"
-								class:filled={!!item}
-								tabindex="-1"
-								disabled={!item || pending}
-								onclick={() => item && useItem(item)}
-								title={item ? `Use ${item.name} (press ${idx + 1})` : `slot ${idx + 1}`}
+{#if failed}
+	<!-- Discrete fail page: never placeholder content, never the palette. -->
+	<main class="failpage"><span>please restart</span></main>
+{:else}
+	<main class="letterbox" style:background={pageBg}>
+		<!-- Duotone luminance map (dark → bg, light → ui) for the "old monitor" mode. -->
+		<svg width="0" height="0" aria-hidden="true" style="position:absolute">
+			<filter id="sgx-duotone" color-interpolation-filters="sRGB">
+				<feColorMatrix
+					color-interpolation-filters="sRGB"
+					type="matrix"
+					values="0.299 0.587 0.114 0 0 0.299 0.587 0.114 0 0 0.299 0.587 0.114 0 0 0 0 0 1 0"
+				/>
+				<feComponentTransfer color-interpolation-filters="sRGB">
+					<feFuncR type={duoFunc} tableValues={duotone.r} />
+					<feFuncG type={duoFunc} tableValues={duotone.g} />
+					<feFuncB type={duoFunc} tableValues={duotone.b} />
+				</feComponentTransfer>
+			</filter>
+		</svg>
+		<div class="frame" style={frameStyle}>
+			<div class="content" class:duo={display.mode !== 'full'}>
+				<header class="statusbar">
+					<div class="grp">
+						<span class="sys">ARG-OS</span>
+						<span class="sep">·</span>
+						{#if buildSource === 'firestore'}
+							<span class="bld" title="content build (builds/build-{build.meta.version})"
+								>BLD {build.meta.version}</span
 							>
-								<span class="key">{idx + 1}</span>
-								{#if item}
-									{#if imgUrl(item.iconPath)}
-										<img src={imgUrl(item.iconPath)} alt={item.name} />
-									{:else}
-										<span class="nm">{item.name}</span>
-									{/if}
-								{/if}
-							</button>
-						{/each}
+						{:else}
+							<span class="bld" class:draft={buildSource === 'draft'}
+								>{buildSource === 'draft' ? 'DRAFT' : 'PLACEHOLDER'}</span
+							>
+						{/if}
+						<span class="sep">·</span>
+						<span class="clock">{alienTime}</span>
 					</div>
-					<!-- (future: map goes here) -->
-				</aside>
+					<div class="grp center">
+						<span class="lbl">LOC</span>
+						<span class="room">{scene.name}</span>
+					</div>
+					<div class="grp right">
+						<span class="status">⚠ CRITICAL</span>
+						<span class="vitals" class:low={vitalsPct <= 25}>
+							VITALS {vitalsPct <= 0 ? 'ERROR' : `${Math.round(vitalsPct)}%`}
+						</span>
+						<span
+							class="led {buildSource}"
+							title={buildSource === 'firestore'
+								? 'Live build (Firestore)'
+								: buildSource === 'draft'
+									? 'Draft — unpublished'
+									: 'Placeholder build'}
+						></span>
+					</div>
+				</header>
 
-				<div class="stage">
-					{#key game.currentSceneId}
-						{@const snap = findScene(build.scenes, game.currentSceneId)!}
-						<div class="scene-holder" in:fade={{ duration: 450 }} out:fade={{ duration: 300 }}>
-							{#if sceneHasArt(snap)}
-								<SceneRenderer scene={snap} {look} />
-							{:else}
-								<div class="nosignal" aria-label="no signal">
-									<div class="static"></div>
-									<span class="nosignal-text">NO SIGNAL</span>
-								</div>
-							{/if}
+				<div class="mid">
+					<aside class="sidebar">
+						<div class="inventory" aria-label="inventory">
+							{#each Array.from({ length: 9 }) as _slot, idx (idx)}
+								{@const item = inventoryItems[idx]}
+								<button
+									type="button"
+									class="slot"
+									class:filled={!!item}
+									tabindex="-1"
+									disabled={!item || pending}
+									onclick={() => item && useItem(item)}
+									title={item ? `Use ${item.name} (press ${idx + 1})` : `slot ${idx + 1}`}
+								>
+									<span class="key">{idx + 1}</span>
+									{#if item}
+										{#if imgUrl(item.iconPath)}
+											<img src={imgUrl(item.iconPath)} alt={item.name} />
+										{:else}
+											<span class="nm">{item.name}</span>
+										{/if}
+									{/if}
+								</button>
+							{/each}
 						</div>
-					{/key}
+
+						<div class="map" aria-label="deck plan">
+							<div class="map-title">DECK PLAN</div>
+							<svg class="map-svg" viewBox="0 0 220 140" preserveAspectRatio="xMidYMid meet">
+								<!-- corridors first, under the room boxes -->
+								{#each mapNodes as n (n.id)}
+									<line class="ml" class:locked={n.locked} x1="110" y1="66" x2={n.x} y2={n.y} />
+								{/each}
+								{#each mapNodes as n (n.id)}
+									<rect
+										class="mr"
+										class:unknown={!n.visited}
+										x={n.x - 11}
+										y={n.y - 7}
+										width="22"
+										height="14"
+									/>
+									<text
+										class="mt"
+										class:unknown={!n.visited}
+										x={n.x}
+										y={n.y + n.labelDy}
+										text-anchor="middle">{shortName(n.label, 10)}</text
+									>
+									{#if n.locked}
+										<!-- padlock badge, centred in the room box -->
+										<g class="mlock" transform="translate({n.x - 4}, {n.y - 4.8})">
+											<path d="M2 4 V2.5 A2 2 0 0 1 6 2.5 V4" />
+											<rect x="0.8" y="4" width="6.4" height="5" />
+										</g>
+									{/if}
+								{/each}
+								<!-- current room: big, outline only, name inside -->
+								<rect class="mcur" x="78" y="46" width="64" height="40" />
+								<text class="mt cur" x="110" y="69" text-anchor="middle"
+									>{shortName(scene.name, 12)}</text
+								>
+								{#if itemsHere}
+									<circle class="map-hint" cx="138" cy="50" r="3">
+										<title>sensors detect loose items here</title>
+									</circle>
+								{/if}
+								{#if !mapNodes.length}
+									<text class="mt unknown" x="110" y="108" text-anchor="middle"
+										>no routes detected</text
+									>
+								{/if}
+							</svg>
+						</div>
+					</aside>
+
+					<div class="stage">
+						{#key game.currentSceneId}
+							{@const snap = findScene(build.scenes, game.currentSceneId)!}
+							<div class="scene-holder" in:fade={{ duration: 450 }} out:fade={{ duration: 300 }}>
+								{#if sceneHasArt(snap)}
+									<SceneRenderer scene={snap} {look} />
+								{:else}
+									<div class="nosignal" aria-label="no signal">
+										<div class="static"></div>
+										<span class="nosignal-text">NO SIGNAL</span>
+									</div>
+								{/if}
+							</div>
+						{/key}
+					</div>
 				</div>
+
+				<section class="terminal">
+					<div class="transcript" bind:this={transcriptEl}>
+						{#each lines as line (line.id)}
+							<p
+								class={line.who}
+								class:latest={line.who === 'computer' && line.id === lastComputerId}
+							>
+								{#if line.who === 'player'}<span class="who">&gt;</span>{/if}{line.text.slice(
+									0,
+									line.revealed
+								)}
+							</p>
+						{/each}
+						{#if pending}<p class="spinner">{spinner}</p>{/if}
+					</div>
+
+					<form
+						class="composer"
+						onsubmit={(e) => {
+							e.preventDefault();
+							sendMessage();
+						}}
+					>
+						<span class="prompt">&gt;</span>
+						<input
+							use:autofocus
+							placeholder={atEnding ? 'type anything to play again…' : 'type to the computer…'}
+							bind:value={inputText}
+							onkeydown={onComposerKey}
+							disabled={pending}
+						/>
+					</form>
+				</section>
+
+				{#if loading}
+					<div class="boot" out:fade={{ duration: 250 }}>
+						<span class="boot-name">ARG-OS</span>
+						<span class="boot-sub">establishing link…<span class="bcur">█</span></span>
+					</div>
+				{/if}
 			</div>
-
-			<section class="terminal">
-				<div class="transcript" bind:this={transcriptEl}>
-					{#each lines as line (line.id)}
-						<p
-							class={line.who}
-							class:latest={line.who === 'computer' && line.id === lastComputerId}
-						>
-							{#if line.who === 'player'}<span class="who">&gt;</span>{/if}{line.text.slice(
-								0,
-								line.revealed
-							)}
-						</p>
-					{/each}
-					{#if pending}<p class="spinner">{spinner}</p>{/if}
-				</div>
-
-				<form
-					class="composer"
-					onsubmit={(e) => {
-						e.preventDefault();
-						sendMessage();
-					}}
-				>
-					<span class="prompt">&gt;</span>
-					<input
-						use:autofocus
-						placeholder={atEnding ? 'type anything to play again…' : 'type to the computer…'}
-						bind:value={inputText}
-						onkeydown={onComposerKey}
-						disabled={pending}
-					/>
-				</form>
-			</section>
-
-			{#if loading}
-				<div class="boot" out:fade={{ duration: 250 }}>
-					<span class="boot-name">ARG-OS</span>
-					<span class="boot-sub">establishing link…<span class="bcur">█</span></span>
-				</div>
-			{/if}
+			<div class="crt" aria-hidden="true" style:background={crtBg}></div>
 		</div>
-		<div class="crt" aria-hidden="true" style:background={crtBg}></div>
-	</div>
-</main>
+	</main>
+{/if}
 
 <style>
+	.failpage {
+		position: fixed;
+		inset: 0;
+		display: grid;
+		place-items: center;
+		background: #000;
+	}
+	.failpage span {
+		font-family: var(--font-terminal);
+		font-size: 1rem;
+		letter-spacing: 0.2em;
+		color: #555;
+	}
 	.letterbox {
 		position: fixed;
 		inset: 0;
@@ -907,9 +1045,10 @@
 		flex-direction: column;
 		gap: 10px;
 	}
-	/* Inventory: 3×3 slots mapped to number keys 1–9. */
+	/* Inventory: 3×3 slots mapped to number keys 1–9 (capped to ~60% of the
+	   sidebar height so the map keeps the space below it). */
 	.inventory {
-		width: min(100%, 100cqh);
+		width: min(100%, 58cqh);
 		display: grid;
 		grid-template-columns: repeat(3, 1fr);
 		gap: 6px;
@@ -917,6 +1056,76 @@
 		background: var(--overlay-bg);
 		border: 1px solid var(--line);
 		box-shadow: 0 0 18px rgba(255, 176, 0, 0.05);
+	}
+
+	/* Local map: top-view schematic — current room centred, connected rooms on a
+	   ring with corridor lines. */
+	.map {
+		flex: 1;
+		min-height: 0;
+		display: flex;
+		flex-direction: column;
+		padding: 8px 12px;
+		background: var(--overlay-bg);
+		border: 1px solid var(--line);
+		box-shadow: 0 0 18px rgba(255, 176, 0, 0.05);
+	}
+	.map-title {
+		font-family: var(--font-terminal);
+		font-size: 11px;
+		letter-spacing: 0.14em;
+		color: var(--ink-dim);
+		margin-bottom: 4px;
+	}
+	.map-svg {
+		flex: 1;
+		min-height: 0;
+		width: 100%;
+	}
+	.ml {
+		stroke: var(--ink-dim);
+		stroke-width: 1.2;
+	}
+	.ml.locked {
+		stroke-dasharray: 4 3;
+	}
+	.mlock path {
+		fill: none;
+		stroke: var(--ink);
+		stroke-width: 1.2;
+	}
+	.mlock rect {
+		fill: var(--ink);
+	}
+	.mr {
+		fill: var(--bg);
+		stroke: var(--ink);
+		stroke-width: 1.4;
+	}
+	.mr.unknown {
+		stroke: var(--ink-dim);
+		stroke-dasharray: 3 2;
+	}
+	.mcur {
+		fill: var(--bg);
+		stroke: var(--ink);
+		stroke-width: 2;
+	}
+	.mt {
+		fill: var(--ink);
+		font-family: var(--font-terminal);
+		font-size: 9px;
+	}
+	.mt.cur {
+		font-weight: 700;
+		text-transform: uppercase;
+	}
+	.mt.unknown {
+		fill: var(--ink-dim);
+	}
+	.map-hint {
+		fill: var(--accent);
+		animation: blink 1.1s steps(1) infinite;
 	}
 	.slot {
 		position: relative;

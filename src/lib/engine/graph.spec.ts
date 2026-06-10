@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import { availableExits, availableHotspots, evaluate, findScene, rollGiveableItems } from './graph';
+import {
+	availableDoors,
+	availableExits,
+	availableHotspots,
+	evaluate,
+	findScene,
+	rollGiveableItems
+} from './graph';
 import { createGameState } from './state';
 import { applyEffects } from './effects';
 import { testBuild } from './fixtures';
@@ -73,6 +80,53 @@ describe('availability helpers', () => {
 describe('findScene', () => {
 	it('returns undefined for unknown ids', () => {
 		expect(findScene(testBuild.scenes, 'nope')).toBeUndefined();
+	});
+});
+
+describe('availableDoors', () => {
+	const mk = (id: string, over: Partial<Scene> = {}): Scene => ({
+		id,
+		name: id.toUpperCase(),
+		layers: [],
+		hotspots: [],
+		exits: [],
+		...over
+	});
+
+	it('links are bidirectional by default: the reverse of an incoming exit is a door', () => {
+		const a = mk('a', { exits: [{ id: 'e1', toSceneId: 'b', label: 'to b' }] });
+		const b = mk('b');
+		const doors = availableDoors([a, b], b, createGameState('b'));
+		expect(doors.map((d) => d.toSceneId)).toEqual(['a']);
+		expect(doors[0].label).toBe('A'); // reverse doors are labelled with the room name
+		expect(doors[0].locked).toBe(false);
+	});
+
+	it('oneWay exits do NOT create a reverse door', () => {
+		const a = mk('a', { exits: [{ id: 'e1', toSceneId: 'b', label: 'chute', oneWay: true }] });
+		const b = mk('b');
+		expect(availableDoors([a, b], b, createGameState('b'))).toEqual([]);
+	});
+
+	it('requiredItems lock a door (both directions) until the player holds ANY one', () => {
+		const a = mk('a', {
+			exits: [{ id: 'e1', toSceneId: 'b', label: 'hatch', requiredItems: ['keycard', 'crowbar'] }]
+		});
+		const b = mk('b');
+		const bare = createGameState('a');
+		expect(availableDoors([a, b], a, bare)[0].locked).toBe(true);
+		expect(availableDoors([a, b], b, createGameState('b'))[0].locked).toBe(true); // reverse side
+		// OR semantics: holding just ONE of the listed items opens it.
+		const withCrowbar = applyEffects(bare, [{ type: 'addItem', itemId: 'crowbar' }]);
+		expect(availableDoors([a, b], a, withCrowbar)[0].locked).toBe(false);
+	});
+
+	it('dedupes when both directions are authored explicitly', () => {
+		const a = mk('a', { exits: [{ id: 'e1', toSceneId: 'b', label: 'to b' }] });
+		const b = mk('b', { exits: [{ id: 'e2', toSceneId: 'a', label: 'to a' }] });
+		const doors = availableDoors([a, b], a, createGameState('a'));
+		expect(doors.map((d) => d.toSceneId)).toEqual(['b']);
+		expect(doors[0].label).toBe('to b'); // the authored exit wins over the reverse
 	});
 });
 

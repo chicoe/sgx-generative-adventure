@@ -72,6 +72,24 @@ export async function saveGraphPositions(positions: GraphPositions) {
 export const saveScene = (s: Scene) =>
 	setDoc(doc(db(), 'draft', 'content', 'scenes', s.id), clean(s));
 export const deleteScene = (id: string) => deleteDoc(doc(db(), 'draft', 'content', 'scenes', id));
+
+/**
+ * Delete a scene AND scrub every link in other scenes that points at it, in one
+ * batch — so no dangling exits are left behind to fail publish validation.
+ */
+export async function deleteSceneAndLinks(id: string): Promise<void> {
+	const draft = await loadDraft();
+	const batch = writeBatch(db());
+	batch.delete(doc(db(), 'draft', 'content', 'scenes', id));
+	for (const s of draft?.scenes ?? []) {
+		if (s.id === id || !s.exits.some((x) => x.toSceneId === id)) continue;
+		batch.set(
+			doc(db(), 'draft', 'content', 'scenes', s.id),
+			clean({ ...s, exits: s.exits.filter((x) => x.toSceneId !== id) })
+		);
+	}
+	await batch.commit();
+}
 export const saveItem = (it: Item) =>
 	setDoc(doc(db(), 'draft', 'content', 'items', it.id), clean(it));
 export const deleteItem = (id: string) => deleteDoc(doc(db(), 'draft', 'content', 'items', id));

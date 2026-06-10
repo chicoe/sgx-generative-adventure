@@ -54,7 +54,9 @@ export const exitSchema = z.object({
 	id: z.string().min(1),
 	toSceneId: z.string().min(1),
 	label: z.string(),
-	condition: conditionSchema.optional()
+	condition: conditionSchema.optional(),
+	oneWay: z.boolean().optional(),
+	requiredItems: z.array(z.string().min(1)).optional()
 });
 
 export const giveableItemSchema = z.object({
