@@ -188,9 +188,11 @@
 					display
 				)};width:{fw}px;height:{fh}px;left:{fleft}px;top:{ftop}px;box-shadow:0 0 8px 5px {display.bg}"
 			>
-				<div class="pscene" class:duo={display.mode !== 'full'}></div>
-				<div class="pstatus">ARG-OS v0.5.2 · CRITICAL</div>
-				<div class="pterm">&gt; ARGOS ready_</div>
+				<div class="pcontent" class:duo={display.mode !== 'full'}>
+					<div class="pscene"></div>
+					<div class="pstatus">ARG-OS v0.5.2 · CRITICAL</div>
+					<div class="pterm">&gt; ARGOS ready_</div>
+				</div>
 				<div class="pcrt" style:background={pcrtBg}></div>
 			</div>
 		</div>
@@ -394,7 +396,14 @@
 			radial-gradient(circle at 75% 65%, #e0a040, transparent 50%),
 			linear-gradient(160deg, #243044, #5a3a2a 60%, #101418);
 	}
-	.pscene.duo {
+	.pcontent {
+		position: absolute;
+		inset: 0;
+	}
+	/* Matches the runtime: in duotone modes the whole content (monochrome-authored
+	   UI + scene) is colourized by the one filter. */
+	.pcontent.duo {
+		background: var(--bg);
 		filter: url(#sgx-duotone-preview);
 	}
 	.pcrt {

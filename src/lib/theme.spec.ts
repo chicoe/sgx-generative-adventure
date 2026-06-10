@@ -61,6 +61,20 @@ describe('theme', () => {
 		expect(v['--ink']).toBe('#000000'); // text becomes the dark colour
 	});
 
+	it('duotone modes author the UI in monochrome for the filter to colourize', () => {
+		// Regression: with a low-luminance ink (Custom1 red, lum≈0.49) palette-coloured
+		// UI inside the filter remapped to a different ramp point than unfiltered UI.
+		// Monochrome authoring makes white land exactly on ui and black exactly on bg.
+		const custom1 = { ...DEFAULT_DISPLAY, bg: '#1d0f44', ui: '#f44e38' } as const;
+		const g = themeVars({ ...custom1, mode: 'gradient' });
+		expect(g['--ink']).toBe('#ffffff');
+		expect(g['--bg']).toBe('#000000');
+		expect(g['--ink-dim']).toBe('#999999'); // 60% grey → the 60% palette blend
+		const pureInv = themeVars({ ...custom1, mode: 'duotone', invertUi: true });
+		expect(pureInv['--bg']).toBe('#ffffff'); // inverted: bright panels…
+		expect(pureInv['--ink']).toBe('#000000'); // …dark text, still monochrome
+	});
+
 	it('CRT strength scales the glow and the scanline overlay', () => {
 		expect(themeVars({ ...DEFAULT_DISPLAY, crt: 0 })['--glow']).toBe(
 			'0 0 0.0px rgba(255, 176, 0, 0)'

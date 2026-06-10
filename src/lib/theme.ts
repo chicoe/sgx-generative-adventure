@@ -74,23 +74,46 @@ export function duotoneTable(bg: string, ui: string): { r: string; g: string; b:
 /** CSS custom properties that recolour the whole UI from the two chosen colours. */
 export function themeVars(d: DisplaySettings): Record<string, string> {
 	const crt = d.crt ?? 1;
-	// Hard duotone ('duotone') is two solid colours only: collapse every shade to
-	// bg or ui, opaque panels, no glow. 'full' / 'gradient' keep the soft palette.
-	const pure = d.mode === 'duotone';
-	// "Invert UI" swaps panel ↔ ink for a bright-panel/dark-text terminal, WITHOUT
-	// touching the scene art (the scene filter still uses the real bg/ui).
+
+	if (d.mode !== 'full') {
+		// Duotone modes: the UI is AUTHORED IN MONOCHROME (white ink on black paper;
+		// greys for dims) and the WHOLE frame content is colourized by the duotone
+		// filter (luminance → bg..ui ramp). White (lum 1) lands exactly on ui, black
+		// exactly on bg, a 60% grey exactly on the 60% blend — so every UI colour is
+		// on the palette ramp BY CONSTRUCTION and filtered scene art can never look
+		// different from the UI (nothing inside the frame skips the filter). This is
+		// what makes low-luminance ink colours (e.g. Custom1 red, lum≈0.49) safe.
+		const pure = d.mode === 'duotone'; // hard two-colour: no shades, opaque, no glow
+		const ink = d.invertUi ? '#000000' : '#ffffff';
+		const paper = d.invertUi ? '#ffffff' : '#000000';
+		const grey = (t: number) => mix(paper, ink, t);
+		return {
+			'--bg': paper,
+			'--panel': pure ? paper : grey(0.06),
+			'--line': pure ? ink : grey(0.28),
+			'--ink': ink,
+			'--ink-dim': pure ? ink : grey(0.6),
+			'--accent': ink,
+			'--amber': ink,
+			'--glow': pure ? 'none' : `0 0 ${(6 * crt).toFixed(1)}px ${rgba(ink, 0.4 * crt)}`,
+			'--overlay-bg': rgba(paper, pure ? 1 : d.uiOpacity)
+		};
+	}
+
+	// Full colour: UI directly in the palette (no filter anywhere near the UI).
+	// "Invert UI" swaps panel ↔ ink for a bright-panel/dark-text terminal.
 	const a = d.invertUi ? d.ui : d.bg; // panel / background colour
 	const b = d.invertUi ? d.bg : d.ui; // ink / foreground colour
 	return {
 		'--bg': a,
-		'--panel': pure ? a : mix(a, b, 0.06),
-		'--line': pure ? b : mix(a, b, 0.28),
+		'--panel': mix(a, b, 0.06),
+		'--line': mix(a, b, 0.28),
 		'--ink': b,
-		'--ink-dim': pure ? b : mix(a, b, 0.6),
-		'--accent': pure ? b : mix(b, '#ffffff', 0.25),
+		'--ink-dim': mix(a, b, 0.6),
+		'--accent': mix(b, '#ffffff', 0.25),
 		'--amber': b,
-		'--glow': pure ? 'none' : `0 0 ${(6 * crt).toFixed(1)}px ${rgba(b, 0.4 * crt)}`,
-		'--overlay-bg': rgba(a, pure ? 1 : d.uiOpacity)
+		'--glow': `0 0 ${(6 * crt).toFixed(1)}px ${rgba(b, 0.4 * crt)}`,
+		'--overlay-bg': rgba(a, d.uiOpacity)
 	};
 }
 

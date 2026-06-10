@@ -64,8 +64,10 @@ async function resolveBehaviour(body: z.infer<typeof requestSchema>): Promise<LL
 	error(400, 'Provide a behaviourId or an inline behaviour');
 }
 
-const FALLBACK_REPLY =
-	'[ placeholder fallback — no live model connected, so the most restrictive outcome was applied. Add a Gemini API key to enable real responses. ]';
+// Shown in the terminal when the model is unreachable (no key, timeout, error).
+// In-story on purpose — the player should never see infrastructure language; the
+// real cause is logged server-side ('[converse] …').
+const FALLBACK_REPLY = '-- trying to re-establish connection --';
 
 export const POST: RequestHandler = async ({ request }) => {
 	const parsed = requestSchema.safeParse(await request.json().catch(() => null));
@@ -96,6 +98,11 @@ export const POST: RequestHandler = async ({ request }) => {
 	let reply = FALLBACK_REPLY;
 	let outcomeId = fallbackOutcome(behaviour).id;
 
+	if (!isConfigured()) {
+		console.warn(
+			'[converse] no Gemini backend configured — set GEMINI_API_KEY (player sees the in-story fallback)'
+		);
+	}
 	if (isConfigured()) {
 		try {
 			const res = await generateLlmResponse(

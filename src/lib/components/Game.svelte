@@ -314,7 +314,7 @@
 				}
 			}
 		} catch {
-			push('system', '[ connection lost — try again ]');
+			push('system', '-- connection lost · please repeat your last transmission --');
 		} finally {
 			pending = false;
 		}
@@ -469,7 +469,7 @@
 				</div>
 			</header>
 
-			<div class="stage" class:duo={display.mode !== 'full'}>
+			<div class="stage">
 				{#key game.currentSceneId}
 					{@const snap = findScene(build.scenes, game.currentSceneId)!}
 					<div class="scene-holder" in:fade={{ duration: 450 }} out:fade={{ duration: 300 }}>
@@ -569,10 +569,17 @@
 		position: absolute;
 		inset: 0;
 	}
-	/* In duotone modes the UI is drawn DIRECTLY in the palette (no filter — that
-	   mangles text/border anti-aliasing). The only non-palette colours are the
-	   semantic ones below; pull them onto the ink colour so everything is two-tone.
-	   Only the scene image (.stage) gets the luminance filter. */
+	/* Duotone modes: the UI inside .content is authored in MONOCHROME (themeVars
+	   emits white-on-black) and this one filter colourizes everything — scene art
+	   and UI — onto the bg→ui ramp. One surface, one colour path: nothing inside
+	   the frame can be off-palette or mismatch the scene. The .crt overlay stays a
+	   SIBLING (outside the filter), applied after quantization. */
+	.content.duo {
+		background: var(--bg);
+		filter: url(#sgx-duotone);
+	}
+	/* Semantic non-palette colours (CRITICAL red, the LED) would otherwise
+	   luminance-snap unpredictably — pull them onto the monochrome ink first. */
 	.content.duo .statusbar .status,
 	.content.duo .statusbar .vitals.low {
 		color: var(--ink);
@@ -645,24 +652,19 @@
 		}
 	}
 
-	/* The scene fills the whole frame; the terminal floats over it. Only the scene
-	   ART is colour-quantized — 'gradient' uses a smooth luminance map, 'duotone' a
-	   hard two-colour threshold (the feFunc `type` switches on `duoFunc`). */
+	/* The scene fills the whole frame; the terminal floats over it. */
 	.stage {
 		position: absolute;
 		inset: 0;
 		overflow: hidden;
 		box-shadow: 0 0 60px rgba(255, 176, 0, 0.05) inset;
 	}
-	.stage.duo {
-		filter: url(#sgx-duotone);
-	}
 	.scene-holder {
 		position: absolute;
 		inset: 0;
 	}
 
-	/* "No signal" fallback for scenes with no art yet: amber-tinged TV snow. */
+	/* "No signal" fallback for scenes with no art yet: palette-tinted TV snow. */
 	.nosignal {
 		position: absolute;
 		inset: 0;
@@ -675,9 +677,14 @@
 		position: absolute;
 		inset: -20%;
 		background-image: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='100' height='100'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix type='saturate' values='0'/></filter><rect width='100' height='100' filter='url(%23n)'/></svg>");
-		background-size: 170px 170px;
+		background-size: 110px 110px;
 		opacity: 0.42;
-		animation: snow 0.5s steps(5) infinite;
+		animation: snow 1.5s steps(6) infinite;
+	}
+	/* Under the duotone filter, faint noise sits below the luminance threshold and
+	   vanishes — push it past the threshold so it resolves into two-colour static. */
+	.content.duo .static {
+		opacity: 0.7;
 	}
 	@keyframes snow {
 		0% {
@@ -708,11 +715,9 @@
 		position: relative;
 		z-index: 2;
 		font-family: var(--font-ui);
-		font-weight: 700;
 		letter-spacing: 0.3em;
-		font-size: 1.6rem;
-		color: var(--ink);
-		text-shadow: 0 0 12px rgba(255, 176, 0, 0.55);
+		font-size: 1.4rem;
+		color: var(--ink-dim);
 		padding: 0.5rem 1.1rem;
 		border: 1px solid var(--line);
 		background: var(--overlay-bg);
