@@ -3,6 +3,7 @@ import {
 	availableDoors,
 	availableExits,
 	availableHotspots,
+	doorUnlockedFlag,
 	evaluate,
 	findScene,
 	rollGiveableItems
@@ -108,17 +109,27 @@ describe('availableDoors', () => {
 		expect(availableDoors([a, b], b, createGameState('b'))).toEqual([]);
 	});
 
-	it('requiredItems lock a door (both directions) until the player holds ANY one', () => {
+	it('requiredItems keep a door locked until EXPLICITLY unlocked; holding one item only enables it', () => {
 		const a = mk('a', {
 			exits: [{ id: 'e1', toSceneId: 'b', label: 'hatch', requiredItems: ['keycard', 'crowbar'] }]
 		});
 		const b = mk('b');
 		const bare = createGameState('a');
-		expect(availableDoors([a, b], a, bare)[0].locked).toBe(true);
+		expect(availableDoors([a, b], a, bare)[0]).toMatchObject({ locked: true, canUnlock: false });
 		expect(availableDoors([a, b], b, createGameState('b'))[0].locked).toBe(true); // reverse side
-		// OR semantics: holding just ONE of the listed items opens it.
+		// OR semantics: holding just ONE qualifying item makes it unlockABLE, not open.
 		const withCrowbar = applyEffects(bare, [{ type: 'addItem', itemId: 'crowbar' }]);
-		expect(availableDoors([a, b], a, withCrowbar)[0].locked).toBe(false);
+		expect(availableDoors([a, b], a, withCrowbar)[0]).toMatchObject({
+			locked: true,
+			canUnlock: true
+		});
+		// The unlock is an engine effect (flag keyed on the authored exit) and opens
+		// the door from BOTH sides.
+		const unlocked = applyEffects(withCrowbar, [
+			{ type: 'setFlag', key: doorUnlockedFlag('e1'), value: true }
+		]);
+		expect(availableDoors([a, b], a, unlocked)[0].locked).toBe(false);
+		expect(availableDoors([a, b], b, unlocked)[0].locked).toBe(false);
 	});
 
 	it('dedupes when both directions are authored explicitly', () => {

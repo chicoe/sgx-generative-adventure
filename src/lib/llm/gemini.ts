@@ -68,7 +68,8 @@ export async function generateLlmResponse(
 	history: ConversationTurn[],
 	playerMessage: string,
 	scene?: SceneContext,
-	opening = false
+	opening = false,
+	revisit = false
 ): Promise<LlmResponse> {
 	const backend = selectBackend();
 	if (!backend) throw new Error('Gemini is not configured');
@@ -80,7 +81,8 @@ export async function generateLlmResponse(
 		history,
 		playerMessage,
 		scene,
-		opening
+		opening,
+		revisit
 	);
 	const config = {
 		systemInstruction,

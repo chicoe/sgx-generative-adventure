@@ -31,6 +31,7 @@ export function resolveEffects(behaviour: LLMBehaviour, outcome: Outcome): Effec
 
 const EXIT_OUTCOME_PREFIX = 'exit:';
 const GRANT_OUTCOME_PREFIX = 'grant:';
+const UNLOCK_OUTCOME_PREFIX = 'unlock:';
 export const NEUTRAL_OUTCOME_ID = '__none__';
 
 /** True for a synthesized "take the player through an exit" outcome. */
@@ -43,9 +44,19 @@ export function isGrantOutcomeId(id: string): boolean {
 	return id.startsWith(GRANT_OUTCOME_PREFIX);
 }
 
-/** Synthesized outcomes (neutral + exits + grants) never carry behaviour-level effects. */
+/** True for a synthesized "unlock a sealed door with a carried item" outcome. */
+export function isUnlockOutcomeId(id: string): boolean {
+	return id.startsWith(UNLOCK_OUTCOME_PREFIX);
+}
+
+/** Synthesized outcomes (neutral/exits/grants/unlocks) never carry behaviour-level effects. */
 export function isSyntheticOutcomeId(id: string): boolean {
-	return id === NEUTRAL_OUTCOME_ID || isExitOutcomeId(id) || isGrantOutcomeId(id);
+	return (
+		id === NEUTRAL_OUTCOME_ID ||
+		isExitOutcomeId(id) ||
+		isGrantOutcomeId(id) ||
+		isUnlockOutcomeId(id)
+	);
 }
 
 /**
@@ -60,7 +71,8 @@ export function isSyntheticOutcomeId(id: string): boolean {
 export function withSyntheticOutcomes(
 	behaviour: LLMBehaviour,
 	exits: { label: string; toSceneId: string }[] = [],
-	grantables: { label: string; itemId: string }[] = []
+	grantables: { label: string; itemId: string }[] = [],
+	unlockables: { label: string; exitId: string }[] = []
 ): LLMBehaviour {
 	const ids = new Set(behaviour.allowedOutcomes.map((o) => o.id));
 	const extra: Outcome[] = [];
@@ -93,6 +105,17 @@ export function withSyntheticOutcomes(
 			label: `Give the player "${g.label}" (item ${g.itemId}) — when they ask for it`,
 			granted: true,
 			effects: [{ type: 'addItem', itemId: g.itemId }]
+		});
+	}
+	for (const u of unlockables) {
+		const id = `${UNLOCK_OUTCOME_PREFIX}${u.exitId}`;
+		if (ids.has(id)) continue;
+		ids.add(id);
+		extra.push({
+			id,
+			label: `Unlock "${u.label}" — the player opens it with an item they carry (does not move them)`,
+			granted: true,
+			effects: [{ type: 'setFlag', key: `unlocked:${u.exitId}`, value: true }]
 		});
 	}
 	return { ...behaviour, allowedOutcomes: [...behaviour.allowedOutcomes, ...extra] };

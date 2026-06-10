@@ -252,15 +252,24 @@
 		return {
 			name: s.name,
 			prompt: s.prompt,
+			cameFrom: cameFromId ? findScene(build.scenes, cameFromId)?.name : undefined,
 			// Doors are bidirectional by default. LOCKED doors never appear in `exits`
-			// (no outcome is synthesized — the model can't move the player through
-			// one), but they're described in `lockedExits` so the computer can talk
-			// about the sealed route and what would open it.
+			// (no outcome is synthesized to move through them). Sealed routes split:
+			// `unlockable` — the player carries a qualifying item, so the model gets
+			// an unlock outcome for the explicit act of opening it — vs `lockedExits`
+			// (info only: what would open it).
 			exits: doors
 				.filter((d) => !d.locked)
-				.map((x) => ({ label: x.label, toSceneId: x.toSceneId })),
+				.map((x) => ({
+					label: x.label,
+					toSceneId: x.toSceneId,
+					back: x.toSceneId === cameFromId || undefined
+				})),
+			unlockable: doors
+				.filter((d) => d.canUnlock)
+				.map((d) => ({ label: d.label, exitId: d.exitId })),
 			lockedExits: doors
-				.filter((d) => d.locked)
+				.filter((d) => d.locked && !d.canUnlock)
 				.map((d) => ({ label: d.label, requires: (d.requiredItems ?? []).map(itemName) })),
 			inventory: state.inventory,
 			// Only offer items present this run that the player doesn't already hold.
@@ -280,23 +289,34 @@
 		activeBehaviourId = shipComputer(b);
 	}
 
+	// Rooms whose opening greeting has already played this run — returning to one
+	// gets a short "welcome back" line instead of the full re-introduction.
+	let greeted: Record<string, boolean> = {};
+	// Where the player arrived from, so the computer can resolve "go back".
+	let cameFromId: string | null = null;
+
 	function initFrom(b: Build) {
 		const started = startGame(b);
 		game = started.state;
 		lines = [];
 		convo = []; // a fresh run starts the computer's memory clean
+		greeted = {};
+		cameFromId = null;
 		vitalsStartedAt = Date.now(); // a fresh run starts at full(ish) vitals
 		enterScene(b, started.state, started.messages);
 	}
 
 	initFrom(placeholderBuild);
 
-	// The computer speaks first when a scene is entered.
+	// The computer speaks first when a scene is entered. Revisited rooms get a
+	// short "welcome back" line instead of the full greeting.
 	async function requestOpening() {
 		const behaviour = activeBehaviourId
 			? build.behaviours.find((b) => b.id === activeBehaviourId)
 			: undefined;
 		if (!behaviour) return;
+		const revisit = !!greeted[game.currentSceneId];
+		greeted[game.currentSceneId] = true;
 		pending = true;
 		try {
 			const resp = await fetch('/api/converse', {
@@ -305,6 +325,7 @@
 				body: JSON.stringify({
 					behaviourId: behaviour.id,
 					opening: true,
+					revisit,
 					history: convo.slice(-MAX_HISTORY_TURNS),
 					sceneContext: sceneContextFor(scene, game)
 				})
@@ -390,10 +411,62 @@
 
 			if (data.appliedEffects.length) {
 				const prev = game.currentSceneId;
+				const prevScene = scene;
+				// Door states before the effects land — to announce changes after.
+				const doorsBefore = availableDoors(build.scenes, prevScene, game);
+				const lockedBefore = new Set(doorsBefore.filter((d) => d.locked).map((d) => d.toSceneId));
+				const canUnlockBefore = new Set(
+					doorsBefore.filter((d) => d.canUnlock).map((d) => d.toSceneId)
+				);
 				game = applyEffects(game, data.appliedEffects);
 				const nav = data.appliedEffects.some((e) => e.type === 'goToScene');
-				if (!nav) push('system', `[ ${data.appliedEffects.map(describeEffect).join(', ')} ]`);
+				if (!nav) {
+					push('system', `[ ${data.appliedEffects.map(describeEffect).join(', ')} ]`);
+					// Engine-generated ground truth for the model: dialogue earlier in the
+					// transcript may contradict the new state, so spell the change out.
+					const stateNotes: string[] = [];
+					for (const e of data.appliedEffects) {
+						if (e.type === 'addItem')
+							stateNotes.push(`the player now holds "${itemName(e.itemId)}"`);
+						if (e.type === 'removeItem')
+							stateNotes.push(`the player no longer holds "${itemName(e.itemId)}"`);
+					}
+					for (const d of availableDoors(build.scenes, prevScene, game)) {
+						if (!d.locked && lockedBefore.has(d.toSceneId)) {
+							push('system', `-- route unlocked: ${d.label} --`);
+							stateNotes.push(`the route "${d.label}" is now UNLOCKED and is an available exit`);
+						} else if (d.canUnlock && !canUnlockBefore.has(d.toSceneId)) {
+							// e.g. a just-granted item qualifies for a sealed door
+							stateNotes.push(
+								`the sealed route "${d.label}" can NOW be unlocked — the player carries what it needs`
+							);
+						}
+					}
+					if (stateNotes.length) {
+						convo = [
+							...convo,
+							{
+								role: 'system',
+								text: `STATE UPDATE: ${stateNotes.join('; ')}.`,
+								behaviourId: behaviour.id
+							}
+						];
+					}
+				}
 				if (game.currentSceneId !== prev) {
+					cameFromId = prev;
+					// Movement event in the LLM history, so the computer carries the
+					// narrative across rooms ("we came here from the cryo pod…").
+					const from = findScene(build.scenes, prev)?.name || prev;
+					const to = findScene(build.scenes, game.currentSceneId)?.name || game.currentSceneId;
+					convo = [
+						...convo,
+						{
+							role: 'system',
+							text: `STATE UPDATE: the player moved from "${from}" to "${to}".`,
+							behaviourId: behaviour.id
+						}
+					];
 					enterScene(build, game, []);
 					await afterEnter();
 				}

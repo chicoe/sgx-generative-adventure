@@ -126,7 +126,9 @@ export interface LLMBehaviour {
 // GameState — per play session (SPEC §4.5).
 // ---------------------------------------------------------------------------
 export interface ConversationTurn {
-	role: 'player' | 'computer';
+	// 'system' turns are engine-generated ground-truth notes (state updates) the
+	// model must trust over earlier dialogue; they are never shown to the player.
+	role: 'player' | 'computer' | 'system';
 	text: string;
 	behaviourId: string;
 }

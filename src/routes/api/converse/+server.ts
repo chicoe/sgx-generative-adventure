@@ -27,10 +27,11 @@ const requestSchema = z.object({
 	// Omitted when `opening` is true (the computer speaks first).
 	playerMessage: z.string().min(1).max(2000).optional(),
 	opening: z.boolean().optional(),
+	revisit: z.boolean().optional(), // opening for a room the player has already been to
 	history: z
 		.array(
 			z.object({
-				role: z.enum(['player', 'computer']),
+				role: z.enum(['player', 'computer', 'system']),
 				text: z.string(),
 				behaviourId: z.string()
 			})
@@ -48,6 +49,9 @@ const requestSchema = z.object({
 			lockedExits: z
 				.array(z.object({ label: z.string(), requires: z.array(z.string()) }))
 				.optional(),
+			// Sealed routes the player can unlock NOW (they hold a qualifying item) —
+			// these DO get a synthesized unlock outcome (setFlag, engine-applied).
+			unlockable: z.array(z.object({ label: z.string(), exitId: z.string() })).optional(),
 			inventory: z.array(z.string()).optional(),
 			giveable: z.array(z.object({ label: z.string(), itemId: z.string() })).optional()
 		})
@@ -87,7 +91,8 @@ export const POST: RequestHandler = async ({ request }) => {
 	const behaviour = withSyntheticOutcomes(
 		await resolveBehaviour(body),
 		body.sceneContext?.exits,
-		body.sceneContext?.giveable
+		body.sceneContext?.giveable,
+		body.sceneContext?.unlockable
 	);
 	const history = body.history as ConversationTurn[];
 
@@ -115,7 +120,8 @@ export const POST: RequestHandler = async ({ request }) => {
 				history,
 				body.playerMessage ?? '',
 				body.sceneContext,
-				body.opening
+				body.opening,
+				body.revisit
 			);
 			reply = res.reply || FALLBACK_REPLY;
 			outcomeId = findOutcome(behaviour, res.outcomeId)?.id ?? fallbackOutcome(behaviour).id;

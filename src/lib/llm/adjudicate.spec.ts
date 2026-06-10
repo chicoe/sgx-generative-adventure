@@ -81,6 +81,14 @@ describe('withSyntheticOutcomes', () => {
 		expect(grant?.effects).toEqual([{ type: 'addItem', itemId: 'pass-card' }]);
 		expect(isSyntheticOutcomeId('grant:pass-card')).toBe(true);
 	});
+
+	it('adds one granted setFlag outcome per unlockable door', () => {
+		const aug = withSyntheticOutcomes(behaviour, [], [], [{ label: 'hatch', exitId: 'e1' }]);
+		const unlock = findOutcome(aug, 'unlock:e1');
+		expect(unlock?.granted).toBe(true);
+		expect(unlock?.effects).toEqual([{ type: 'setFlag', key: 'unlocked:e1', value: true }]);
+		expect(isSyntheticOutcomeId('unlock:e1')).toBe(true);
+	});
 });
 
 describe('resolveEffects', () => {
