@@ -41,10 +41,27 @@
 
 <div class="editor">
 	<header>
-		<span class="brand">ADVENTURE ENGINE · EDITOR</span>
+		<div class="bar info">
+			<span class="brand">ADVENTURE ENGINE · EDITOR</span>
+			<span class="spacer"></span>
+			{#if authStore.user}
+				{#if draftStatus.dirty}
+					<a
+						class="status dirty"
+						href={resolve('/editor')}
+						title="The draft has changes that aren't live yet — save & publish a version"
+						>● unpublished changes</a
+					>
+				{:else if draftStatus.checked}
+					<span class="status clean" title="The draft matches the live version">✓ published</span>
+				{/if}
+				<span class="who">{authStore.user.email}</span>
+				<button type="button" onclick={() => logout()}>sign out</button>
+			{/if}
+		</div>
 		{#if authStore.user}
-			<nav>
-				<a href={resolve('/editor')}>Dashboard</a>
+			<nav class="bar">
+				<a href={resolve('/editor')}>Overview</a>
 				<a href={resolve('/editor/graph')}>Graph</a>
 				<a href={resolve('/editor/scenes')}>Scenes</a>
 				<a href={resolve('/editor/items')}>Items</a>
@@ -53,19 +70,6 @@
 				<a href={resolve('/testplay')}>▶ Test</a>
 				<a href={resolve('/play')}>▶ Play</a>
 			</nav>
-			<span class="spacer"></span>
-			{#if draftStatus.dirty}
-				<a
-					class="status dirty"
-					href={resolve('/editor')}
-					title="The draft has changes that aren't live yet — open the dashboard to publish"
-					>● unpublished changes</a
-				>
-			{:else if draftStatus.checked}
-				<span class="status clean" title="The draft matches the live build">✓ published</span>
-			{/if}
-			<span class="who">{authStore.user.email}</span>
-			<button type="button" onclick={() => logout()}>sign out</button>
 		{/if}
 	</header>
 
@@ -96,20 +100,25 @@
 
 <style>
 	header {
+		border-bottom: 1px solid var(--line);
+		font-size: 0.85rem;
+	}
+	.bar {
 		display: flex;
 		align-items: center;
 		gap: 1rem;
-		padding: 0.7rem 1.25rem;
+		padding: 0.55rem 1.25rem;
+	}
+	.bar.info {
 		border-bottom: 1px solid var(--line);
-		font-size: 0.85rem;
 	}
 	.brand {
 		letter-spacing: 0.18em;
 		color: var(--ink-dim);
+		white-space: nowrap;
 	}
-	header nav {
-		display: flex;
-		gap: 1rem;
+	header nav a {
+		white-space: nowrap;
 	}
 	.spacer {
 		flex: 1;

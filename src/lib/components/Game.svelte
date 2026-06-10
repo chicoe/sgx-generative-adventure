@@ -440,7 +440,17 @@
 		<div class="content" class:duo={display.mode !== 'full'}>
 			<header class="statusbar">
 				<div class="grp">
-					<span class="sys">ARG-OS v0.5.2 beta</span>
+					<span class="sys">ARG-OS</span>
+					<span class="sep">·</span>
+					{#if buildSource === 'firestore'}
+						<span class="bld" title="content build (builds/build-{build.meta.version})"
+							>BLD {build.meta.version}</span
+						>
+					{:else}
+						<span class="bld" class:draft={buildSource === 'draft'}
+							>{buildSource === 'draft' ? 'DRAFT' : 'PLACEHOLDER'}</span
+						>
+					{/if}
 					<span class="sep">·</span>
 					<span class="clock">{alienTime}</span>
 				</div>
@@ -453,11 +463,6 @@
 					<span class="vitals" class:low={vitalsPct <= 25}>
 						VITALS {vitalsPct <= 0 ? 'ERROR' : `${Math.round(vitalsPct)}%`}
 					</span>
-					{#if buildSource !== 'firestore'}<span
-							class="ph-tag"
-							class:draft={buildSource === 'draft'}
-							>{buildSource === 'draft' ? 'DRAFT' : 'PLACEHOLDER'}</span
-						>{/if}
 					<span
 						class="led {buildSource}"
 						title={buildSource === 'firestore'
@@ -590,7 +595,7 @@
 		background: var(--ink);
 		box-shadow: none;
 	}
-	.content.duo .ph-tag {
+	.content.duo .bld {
 		color: var(--ink-dim);
 	}
 
@@ -765,6 +770,14 @@
 		color: var(--ink-dim);
 		font-size: 0.7rem;
 	}
+	.statusbar .bld {
+		color: var(--ink-dim);
+		font-size: 0.7rem;
+		letter-spacing: 0.05em;
+	}
+	.statusbar .bld.draft {
+		color: #46b4ff;
+	}
 	.statusbar .room {
 		text-transform: uppercase;
 	}
@@ -810,14 +823,6 @@
 	.led.draft {
 		background: #46b4ff;
 		box-shadow: 0 0 8px #46b4ff;
-	}
-	.ph-tag {
-		font-size: 0.68rem;
-		letter-spacing: 0.08em;
-		color: #d8a23a;
-	}
-	.ph-tag.draft {
-		color: #46b4ff;
 	}
 
 	/* Left-hand inventory HUD: 3×3 slots mapped to number keys 1–9. */

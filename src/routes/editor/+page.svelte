@@ -1,12 +1,19 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { resolve } from '$app/paths';
-	import { loadDraft, seedDraftFromBuild, setDefaultBehaviour } from '$lib/content/draft';
 	import {
-		publishDraftClient,
+		loadDraft,
+		seedDraftFromBuild,
+		restoreDraftFromBuild,
+		setDefaultBehaviour
+	} from '$lib/content/draft';
+	import {
+		saveDraftBuild,
 		listBuilds,
-		rollbackTo,
+		setActiveBuild,
+		setBuildMessage,
 		getActiveBuildId,
+		getBuild,
 		type BuildSummary
 	} from '$lib/content/publishClient';
 	import { placeholderBuild } from '$lib/game/placeholderBuild';
@@ -57,14 +64,18 @@
 	const seed = () =>
 		run(() => seedDraftFromBuild(placeholderBuild), 'Draft seeded from the placeholder build.');
 
-	async function publish() {
+	let commitMsg = $state('');
+	async function save() {
 		busy = true;
 		message = '';
 		errors = [];
 		try {
-			const r = await publishDraftClient();
+			const r = await saveDraftBuild(commitMsg.trim() || undefined);
 			if (r.errors.length) errors = r.errors;
-			else message = `Published ${r.buildId} and pointed the live game at it.`;
+			else {
+				message = `Saved ${r.buildId}. Press "publish version" below to make it live.`;
+				commitMsg = '';
+			}
 			await refresh();
 		} catch (e) {
 			errors = [e instanceof Error ? e.message : String(e)];
@@ -73,23 +84,47 @@
 		}
 	}
 
-	const rollback = (id: string) => run(() => rollbackTo(id), `Rolled the live game back to ${id}.`);
+	const publishVersion = (id: string) =>
+		run(() => setActiveBuild(id), `${id} is now live — the game runs this version.`);
+
+	// Inline editing of a version's commit message.
+	let editingId = $state<string | null>(null);
+	let editMsg = $state('');
+	function startEdit(b: BuildSummary) {
+		editingId = b.id;
+		editMsg = b.message ?? '';
+	}
+	function saveEdit() {
+		const id = editingId;
+		if (!id) return;
+		editingId = null;
+		run(() => setBuildMessage(id, editMsg), 'Commit message updated.');
+	}
 	const setComputer = (id: string) => run(() => setDefaultBehaviour(id), 'Ship computer set.');
+	function restoreVersion(id: string) {
+		if (
+			!confirm(
+				`Restore the settings and content of ${id} into the editor?\n\nThis OVERWRITES your current settings and content with that version's snapshot — unsaved/unpublished edits are lost. (The live game is not touched.)`
+			)
+		)
+			return;
+		run(async () => restoreDraftFromBuild(await getBuild(id)), `Editor restored to ${id}.`);
+	}
 </script>
 
-<h1>Dashboard</h1>
+<h1>Overview</h1>
 {#if !hasContent}
 	<p class="note">
 		⚠ Placeholder content. Seed from the placeholder build to explore, or start your own in
 		<strong>Graph</strong> / <strong>Scenes</strong> / <strong>Items</strong> /
-		<strong>Behaviours</strong>, then publish.
+		<strong>Behaviours</strong>, then save &amp; publish a version.
 	</p>
 {/if}
 
 {#if message}<p class="ok">{message}</p>{/if}
 {#if errors.length}
 	<div class="errors">
-		<strong>Validation failed — publish blocked:</strong>
+		<strong>Validation failed — save blocked:</strong>
 		<ul>
 			{#each errors as e, i (i)}<li>{e}</li>{/each}
 		</ul>
@@ -99,10 +134,6 @@
 <section>
 	<h2>Draft</h2>
 	{#if draft}
-		<p>
-			Start scene: <code>{draft.meta.startSceneId || '—'}</code> · {draft.scenes.length} scenes ·
-			{draft.items.length} items · {draft.behaviours.length} behaviours
-		</p>
 		<label class="computer">
 			Ship computer <span class="muted">(the behaviour the player talks to everywhere)</span>
 			<select
@@ -118,44 +149,85 @@
 		<p class="muted">No draft yet.</p>
 	{/if}
 	{#if draftStatus.dirty}
-		<p class="dirty-note">● Unpublished changes — Validate &amp; publish to push them live.</p>
+		<p class="dirty-note">
+			● Unpublished changes — save a version, then publish it to push them live.
+		</p>
 	{/if}
 	<div class="row">
 		{#if !hasContent}
 			<button type="button" onclick={seed} disabled={busy}>Seed draft from placeholder</button>
 		{/if}
-		<button type="button" class="primary" onclick={publish} disabled={busy}
-			>Validate &amp; publish</button
+		<input
+			class="commit"
+			placeholder="commit message (optional)"
+			bind:value={commitMsg}
+			disabled={busy}
+		/>
+		<button type="button" class="primary" onclick={save} disabled={busy}>Validate &amp; save</button
 		>
 	</div>
 </section>
 
 <section>
-	<h2>Published builds</h2>
+	<h2>Versions</h2>
 	{#if builds.length}
 		<ul class="builds">
 			{#each builds as b (b.id)}
-				<li>
+				<li class="vrow">
+					{#if b.id === activeBuildId}
+						<button type="button" class="live-btn" disabled>● live</button>
+					{:else}
+						<button
+							type="button"
+							class="cell-btn"
+							title="Make this version the live game"
+							onclick={() => publishVersion(b.id)}
+							disabled={busy}>publish</button
+						>
+					{/if}
+					<button
+						type="button"
+						class="cell-btn"
+						title="Load this version's settings & content into the editor (overwrites current)"
+						onclick={() => restoreVersion(b.id)}
+						disabled={busy}>restore settings</button
+					>
+					<button
+						type="button"
+						class="cell-btn edit"
+						title="Edit the commit message"
+						onclick={() => startEdit(b)}
+						disabled={busy}>✎</button
+					>
 					<span class="bid">{b.id}</span>
 					<span class="muted">{new Date(b.publishedAt).toLocaleString()}</span>
-					{#if b.id === activeBuildId}
-						<span class="live">● live</span>
-					{:else}
-						<button type="button" onclick={() => rollback(b.id)} disabled={busy}
-							>roll back here</button
+					{#if editingId === b.id}
+						<form
+							class="msgline"
+							onsubmit={(e) => {
+								e.preventDefault();
+								saveEdit();
+							}}
 						>
+							<!-- svelte-ignore a11y_autofocus -->
+							<input autofocus placeholder="commit message" bind:value={editMsg} />
+							<button type="submit">save</button>
+							<button type="button" onclick={() => (editingId = null)}>cancel</button>
+						</form>
+					{:else if b.message}
+						<span class="msgline bmsg">“{b.message}”</span>
 					{/if}
 				</li>
 			{/each}
 		</ul>
 	{:else}
 		<p class="muted">
-			Nothing published yet — {hasContent
-				? 'Validate & publish to go live.'
-				: 'seed a draft, then publish.'}
+			No versions yet — {hasContent
+				? 'Validate & save one, then publish it.'
+				: 'seed a draft, then save a version.'}
 		</p>
 	{/if}
-	<p><a href={resolve('/play')}>▶ Open the game</a> to see the active build.</p>
+	<p><a href={resolve('/play')}>▶ Open the game</a> to see the live version.</p>
 </section>
 
 <style>
@@ -218,6 +290,19 @@
 		gap: 0.6rem;
 		margin-top: 0.8rem;
 	}
+	.commit {
+		flex: 1;
+		max-width: 24rem;
+		font: inherit;
+		color: var(--ink);
+		background: #0c0e11;
+		border: 1px solid var(--line);
+		padding: 0.45rem 0.6rem;
+	}
+	.bmsg {
+		color: var(--ink);
+		font-style: italic;
+	}
 	button {
 		font: inherit;
 		cursor: pointer;
@@ -237,25 +322,68 @@
 	button.primary {
 		border-color: var(--accent);
 	}
+	/* The versions table: one grid on the list; each version is a bordered BLOCK
+	   spanning all columns and subgridding them, so the columns
+	   ([publish/live] [restore] [edit] [id] [date]) stay aligned across blocks
+	   while the commit message clearly lives inside its version's box. */
 	.builds {
 		list-style: none;
 		padding: 0;
-		display: flex;
-		flex-direction: column;
-		gap: 0.4rem;
+		display: grid;
+		grid-template-columns: repeat(3, max-content) max-content 1fr;
+		gap: 0.55rem 0.9rem;
 	}
-	.builds li {
+	.vrow {
+		grid-column: 1 / -1;
+		display: grid;
+		grid-template-columns: subgrid;
+		gap: 0.45rem 0.9rem;
+		align-items: center;
+		border: 1px solid var(--line);
+		background: var(--panel);
+		padding: 0.55rem 0.7rem;
+	}
+	.cell-btn {
+		width: 100%;
+		white-space: nowrap;
+		font-size: 0.85rem;
+		padding: 0.35rem 0.7rem;
+	}
+	/* "live" looks like the other buttons but isn't clickable. */
+	.live-btn {
+		width: 100%;
+		white-space: nowrap;
+		font-size: 0.85rem;
+		padding: 0.35rem 0.7rem;
+		color: #9fc0a8;
+		border-color: #3a5a44;
+		opacity: 1;
+		cursor: default;
+	}
+	.edit {
+		color: var(--ink-dim);
+	}
+	.msgline {
+		grid-column: 1 / -1;
 		display: flex;
 		align-items: center;
-		gap: 0.8rem;
+		gap: 0.5rem;
+	}
+	.msgline input {
+		flex: 1;
+		max-width: 34rem;
+		font: inherit;
+		color: var(--ink);
+		background: #0c0e11;
+		border: 1px solid var(--line);
+		padding: 0.3rem 0.5rem;
+	}
+	.msgline button {
+		font-size: 0.8rem;
+		padding: 0.25rem 0.6rem;
 	}
 	.bid {
 		font-family: inherit;
-	}
-	.live {
-		color: #9fc0a8;
-	}
-	code {
-		color: var(--accent);
+		white-space: nowrap;
 	}
 </style>

@@ -171,6 +171,7 @@ export interface BuildDoc {
 	publishedAt: string;
 	startSceneId: string;
 	payload: string;
+	message?: string; // optional commit message, for identifying versions in lists
 }
 
 export function serializeBuild(build: Build): BuildDoc {

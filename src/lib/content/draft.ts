@@ -5,6 +5,7 @@
 import {
 	collection,
 	deleteDoc,
+	deleteField,
 	doc,
 	getDoc,
 	getDocs,
@@ -83,6 +84,44 @@ export const deleteBehaviour = (id: string) =>
 export async function seedDraftFromBuild(build: Build): Promise<void> {
 	const batch = writeBatch(db());
 	batch.set(rootDoc(), { startSceneId: build.meta.startSceneId });
+	for (const s of build.scenes) batch.set(doc(db(), 'draft', 'content', 'scenes', s.id), clean(s));
+	for (const it of build.items) batch.set(doc(db(), 'draft', 'content', 'items', it.id), clean(it));
+	for (const b of build.behaviours)
+		batch.set(doc(db(), 'draft', 'content', 'behaviours', b.id), clean(b));
+	await batch.commit();
+}
+
+/**
+ * Rewind the DRAFT to exactly a build's content: overwrites every scene/item/
+ * behaviour, deletes draft docs the build doesn't have, and restores the meta
+ * (start scene, ship computer, display settings). Editor-only graph positions
+ * are preserved. Destructive to unpublished edits — confirm before calling.
+ */
+export async function restoreDraftFromBuild(build: Build): Promise<void> {
+	const current = await loadDraft();
+	const batch = writeBatch(db());
+	// merge:true keeps editor-only graphPositions; deleteField (not null) for absent
+	// meta so loadDraft keeps returning undefined and zod `.optional()` stays happy.
+	batch.set(
+		rootDoc(),
+		{
+			startSceneId: build.meta.startSceneId,
+			defaultBehaviourId: build.meta.defaultBehaviourId ?? deleteField(),
+			display: build.meta.display ? clean(build.meta.display) : deleteField()
+		},
+		{ merge: true }
+	);
+	const keep = {
+		scenes: new Set(build.scenes.map((s) => s.id)),
+		items: new Set(build.items.map((i) => i.id)),
+		behaviours: new Set(build.behaviours.map((b) => b.id))
+	};
+	for (const s of current?.scenes ?? [])
+		if (!keep.scenes.has(s.id)) batch.delete(doc(db(), 'draft', 'content', 'scenes', s.id));
+	for (const it of current?.items ?? [])
+		if (!keep.items.has(it.id)) batch.delete(doc(db(), 'draft', 'content', 'items', it.id));
+	for (const b of current?.behaviours ?? [])
+		if (!keep.behaviours.has(b.id)) batch.delete(doc(db(), 'draft', 'content', 'behaviours', b.id));
 	for (const s of build.scenes) batch.set(doc(db(), 'draft', 'content', 'scenes', s.id), clean(s));
 	for (const it of build.items) batch.set(doc(db(), 'draft', 'content', 'items', it.id), clean(it));
 	for (const b of build.behaviours)

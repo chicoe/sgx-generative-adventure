@@ -18,12 +18,15 @@ service cloud.firestore {
         ];
     }
 
-    // Published builds: world-readable. Editors may CREATE new snapshots; builds
-    // are immutable (no update/delete), so a publish can never mutate history.
+    // Published builds: world-readable. Editors may CREATE new snapshots; build
+    // CONTENT is immutable (a publish can never mutate history) — only the
+    // human-facing commit `message` may be edited after the fact.
     match /builds/{buildId} {
       allow read: if true;
       allow create: if isEditor();
-      allow update, delete: if false;
+      allow update: if isEditor()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['message']);
+      allow delete: if false;
     }
     // The live pointer: world-readable; editors flip it on publish/rollback.
     match /config/{document} {
