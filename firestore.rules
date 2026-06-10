@@ -9,13 +9,12 @@ service cloud.firestore {
   match /databases/{database}/documents {
 
     function isEditor() {
-      // Mirror EDITOR_ALLOWED_EMAILS. Email/Password users created in the console
-      // are not email_verified, so we don't require it here.
-      return request.auth != null
-        && request.auth.token.email in [
-          'francisco@incomputable.io',
-          'test@incomputable.io'
-        ];
+      // ANY signed-in user is an editor. This is safe ONLY because accounts are
+      // created exclusively by the admin in the Firebase console — self-service
+      // sign-up MUST stay disabled (Authentication → Settings → User actions →
+      // untick "Enable create"), otherwise anyone could register themselves an
+      // editor account with the public API key.
+      return request.auth != null;
     }
 
     // Published builds: world-readable. Editors may CREATE new snapshots; build

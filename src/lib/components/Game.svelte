@@ -7,6 +7,8 @@
 	import { availableExits, findScene, rollGiveableItems } from '$lib/engine/graph';
 	import { applyEffects } from '$lib/engine/effects';
 	import { loadActiveBuild } from '$lib/content/loader';
+	import { doc, onSnapshot } from 'firebase/firestore';
+	import { db } from '$lib/firebase/client';
 	import { DEFAULT_DISPLAY, themeStyle, duotoneTable, crtBackground } from '$lib/theme';
 	import type { Build, ConversationTurn, Effect, GameState, Item, Scene } from '$lib/engine/types';
 
@@ -14,8 +16,14 @@
 	// active published build; /testplay assembles the current (unpublished) draft.
 	type BuildSource = 'firestore' | 'placeholder' | 'draft';
 	let {
-		loadBuild = loadActiveBuild
-	}: { loadBuild?: () => Promise<{ build: Build; source: BuildSource }> } = $props();
+		loadBuild = loadActiveBuild,
+		// Watch config/current and fully reload when a new version is published, so
+		// the kiosk picks up updates by itself. /testplay opts out (it runs the draft).
+		reloadOnPublish = true
+	}: {
+		loadBuild?: () => Promise<{ build: Build; source: BuildSource }>;
+		reloadOnPublish?: boolean;
+	} = $props();
 
 	const clamp = (n: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, n));
 	function autofocus(node: HTMLInputElement) {
@@ -387,6 +395,7 @@
 	onMount(() => {
 		computeScale();
 		const clockId = setInterval(() => (clockNow = Date.now()), 1000);
+		let unsubLive: (() => void) | undefined;
 		loadBuild()
 			.then(({ build: loaded, source }) => {
 				buildSource = source;
@@ -394,6 +403,22 @@
 				initFrom(loaded);
 				loading = false; // reveal the resolved build
 				afterEnter();
+
+				// Live-update: when the editor publishes a different version, reload the
+				// whole page so the kiosk picks up new content (and any new app code).
+				// The sessionStorage guard reloads at most once per target build, so a
+				// build that keeps failing to load can never cause a reload loop.
+				if (reloadOnPublish) {
+					const runningId = source === 'firestore' ? `build-${loaded.meta.version}` : null;
+					unsubLive = onSnapshot(doc(db(), 'config', 'current'), (snap) => {
+						const liveId = snap.data()?.activeBuildId as string | undefined;
+						if (!liveId || liveId === runningId) return;
+						const KEY = 'sgx-reloaded-for';
+						if (sessionStorage.getItem(KEY) === liveId) return;
+						sessionStorage.setItem(KEY, liveId);
+						location.reload();
+					});
+				}
 			})
 			.catch(() => (loading = false));
 
@@ -413,6 +438,7 @@
 			cancelAnimationFrame(raf);
 			clearInterval(clockId);
 			clearEndingTimer();
+			unsubLive?.();
 		};
 	});
 </script>

@@ -35,7 +35,7 @@
 		Sign in via the <a href={resolve('/editor')}>editor</a> first to test the unpublished draft.
 	</p>
 {:else}
-	<Game loadBuild={loadDraftBuild} />
+	<Game loadBuild={loadDraftBuild} reloadOnPublish={false} />
 {/if}
 
 <style>
