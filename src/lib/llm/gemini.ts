@@ -88,7 +88,11 @@ export async function generateLlmResponse(
 		systemInstruction,
 		responseMimeType: 'application/json',
 		responseSchema: responseSchema(behaviour.allowedOutcomes.map((o) => o.id)),
-		temperature: 0.8
+		temperature: 0.8,
+		// Flash models think by default — thinking tokens bill as output and add
+		// latency, neither of which a kiosk chat wants. (Pro rejects a 0 budget,
+		// hence the gate.)
+		...(model.includes('flash') ? { thinkingConfig: { thinkingBudget: 0 } } : {})
 	};
 
 	let lastErr: unknown;
