@@ -2,12 +2,32 @@
 	import { onMount } from 'svelte';
 	import { loadDraft, saveItem, deleteItem } from '$lib/content/draft';
 	import { draftStatus } from '$lib/content/draftStatus.svelte';
+	import { uploadItemIcon } from '$lib/firebase/storage';
 	import type { Item } from '$lib/engine/types';
 
 	let items = $state<Item[]>([]);
 	let busy = $state(false);
+	let uploading = $state(false);
 	let message = $state('');
 	let draftNew = $state<Item>({ id: '', name: '', iconPath: '', description: '' });
+
+	const imgUrl = (p: string) =>
+		!p ? '' : /^(https?:)?\/\//.test(p) || p.startsWith('/') ? p : `/${p}`;
+
+	// Uploads are capped at 200×200 (png/jpeg auto-downscaled; oversized gifs
+	// rejected to keep their animation). Sets the target's iconPath; Save persists.
+	async function uploadIcon(target: Item, file?: File) {
+		if (!file) return;
+		uploading = true;
+		message = '';
+		try {
+			target.iconPath = await uploadItemIcon(file);
+		} catch (e) {
+			message = e instanceof Error ? e.message : String(e);
+		} finally {
+			uploading = false;
+		}
+	}
 
 	async function refresh() {
 		items = (await loadDraft())?.items ?? [];
@@ -55,7 +75,8 @@
 <h1>Items</h1>
 {#if !items.length}
 	<p class="note">
-		⚠ Placeholder content. Icon upload (Storage) comes later — `iconPath` is a path/URL for now.
+		⚠ Placeholder content. Give each item an icon — upload an image (png/jpeg/gif, max 200×200) or
+		paste a path/URL.
 	</p>
 {/if}
 {#if message}<p class="msg">{message}</p>{/if}
@@ -70,9 +91,22 @@
 				>
 			</div>
 			<label>name <input bind:value={item.name} /></label>
-			<label>iconPath <input bind:value={item.iconPath} placeholder="items/key.png" /></label>
+			<div class="icon">
+				{#if item.iconPath}<img class="thumb" src={imgUrl(item.iconPath)} alt="" />{/if}
+				<div class="icon-fields">
+					<label
+						>icon (path / URL)
+						<input bind:value={item.iconPath} placeholder="items/key.png" />
+					</label>
+					<input
+						type="file"
+						accept="image/png,image/jpeg,image/gif"
+						onchange={(e) => uploadIcon(item, e.currentTarget.files?.[0])}
+					/>
+				</div>
+			</div>
 			<label>description <input bind:value={item.description} /></label>
-			<button type="button" onclick={() => save(item)} disabled={busy}>Save</button>
+			<button type="button" onclick={() => save(item)} disabled={busy || uploading}>Save</button>
 		</div>
 	{:else}
 		<p class="muted">No items yet.</p>
@@ -83,9 +117,20 @@
 	<h2>New item</h2>
 	<label>id <input bind:value={draftNew.id} placeholder="keycard" /></label>
 	<label>name <input bind:value={draftNew.name} /></label>
-	<label>iconPath <input bind:value={draftNew.iconPath} /></label>
+	<div class="icon">
+		{#if draftNew.iconPath}<img class="thumb" src={imgUrl(draftNew.iconPath)} alt="" />{/if}
+		<div class="icon-fields">
+			<label>icon (path / URL) <input bind:value={draftNew.iconPath} /></label>
+			<input
+				type="file"
+				accept="image/png,image/jpeg,image/gif"
+				onchange={(e) => uploadIcon(draftNew, e.currentTarget.files?.[0])}
+			/>
+		</div>
+	</div>
 	<label>description <input bind:value={draftNew.description} /></label>
-	<button type="button" onclick={create} disabled={busy}>Create</button>
+	<button type="button" onclick={create} disabled={busy || uploading}>Create</button>
+	{#if uploading}<span class="muted">uploading…</span>{/if}
 </div>
 
 <style>
@@ -143,6 +188,29 @@
 		background: #0c0e11;
 		border: 1px solid var(--line);
 		padding: 0.35rem 0.5rem;
+	}
+	.icon {
+		display: flex;
+		gap: 0.6rem;
+		align-items: flex-start;
+	}
+	.icon-fields {
+		flex: 1;
+		display: flex;
+		flex-direction: column;
+		gap: 0.35rem;
+		min-width: 0;
+	}
+	.icon-fields input[type='file'] {
+		font-size: 0.75rem;
+		padding: 0.25rem;
+	}
+	.thumb {
+		width: 48px;
+		height: 48px;
+		object-fit: contain;
+		border: 1px solid var(--line);
+		background: #0c0e11;
 	}
 	button {
 		font: inherit;

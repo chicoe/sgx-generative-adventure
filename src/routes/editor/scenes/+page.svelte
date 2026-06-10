@@ -229,7 +229,7 @@
 							<input placeholder="image path / URL" bind:value={current.layers[i].imagePath} />
 							<input
 								type="file"
-								accept="image/*"
+								accept="image/png,image/jpeg,image/gif"
 								onchange={(e) => upload(i, e.currentTarget.files?.[0])}
 							/>
 						</div>
