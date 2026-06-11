@@ -52,8 +52,15 @@ const requestSchema = z.object({
 			// Sealed routes the player can unlock NOW (they hold a qualifying item) —
 			// these DO get a synthesized unlock outcome (setFlag, engine-applied).
 			unlockable: z.array(z.object({ label: z.string(), exitId: z.string() })).optional(),
-			inventory: z.array(z.string()).optional(),
-			giveable: z.array(z.object({ label: z.string(), itemId: z.string() })).optional()
+			// Items include their authored description — important info for the model.
+			inventory: z
+				.array(z.object({ name: z.string(), description: z.string().optional() }))
+				.optional(),
+			giveable: z
+				.array(
+					z.object({ label: z.string(), itemId: z.string(), description: z.string().optional() })
+				)
+				.optional()
 		})
 		.optional()
 });

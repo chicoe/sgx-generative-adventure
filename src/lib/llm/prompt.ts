@@ -18,8 +18,10 @@ export interface SceneContext {
 	exits?: { label: string; toSceneId: string; back?: boolean }[];
 	lockedExits?: { label: string; requires: string[] }[]; // sealed, player lacks the items (info only)
 	unlockable?: { label: string; exitId: string }[]; // sealed, but the player carries what opens it
-	inventory?: string[];
-	giveable?: { label: string; itemId: string }[]; // items the computer may hand over here
+	// Items carry their authored description — it holds the important information
+	// about what an item is and does.
+	inventory?: { name: string; description?: string }[];
+	giveable?: { label: string; itemId: string; description?: string }[]; // items the computer may hand over here
 }
 
 function sceneSection(scene: SceneContext): string {
@@ -40,8 +42,17 @@ function sceneSection(scene: SceneContext): string {
 		? scene.unlockable.map((e) => `- ${e.label} (unlock outcome "unlock:${e.exitId}")`).join('\n')
 		: '';
 	const giveable = scene.giveable?.length
-		? scene.giveable.map((g) => `- ${g.label} (item "${g.itemId}")`).join('\n')
+		? scene.giveable
+				.map(
+					(g) => `- ${g.label} (item "${g.itemId}")${g.description ? ` — ${g.description}` : ''}`
+				)
+				.join('\n')
 		: '- (none)';
+	const inventory = scene.inventory?.length
+		? scene.inventory
+				.map((i) => `- ${i.name}${i.description ? ` — ${i.description}` : ''}`)
+				.join('\n')
+		: '- (empty)';
 	return [
 		`CURRENT SCENE: ${scene.name ?? '(unnamed)'}`,
 		scene.prompt ? `SCENE NOTES: ${scene.prompt}` : '',
@@ -58,7 +69,8 @@ function sceneSection(scene: SceneContext): string {
 		unlockable,
 		'ITEMS PRESENT HERE THAT YOU CAN GIVE THE PLAYER:',
 		giveable,
-		`PLAYER INVENTORY: ${scene.inventory?.length ? scene.inventory.join(', ') : '(empty)'}`
+		'PLAYER INVENTORY (what each item is and does):',
+		inventory
 	]
 		.filter(Boolean)
 		.join('\n');

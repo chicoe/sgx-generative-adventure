@@ -295,11 +295,19 @@
 			lockedExits: doors
 				.filter((d) => d.locked && !d.canUnlock)
 				.map((d) => ({ label: d.label, requires: (d.requiredItems ?? []).map(itemName) })),
-			inventory: state.inventory,
+			// Items carry their authored description — that's where their meaning lives.
+			inventory: state.inventory.map((id) => {
+				const it = build.items.find((i) => i.id === id);
+				return { name: it?.name || id, description: it?.description || undefined };
+			}),
 			// Only offer items present this run that the player doesn't already hold.
 			giveable: presentGiveables
 				.filter((id) => !owned.has(id))
-				.map((id) => ({ itemId: id, label: itemName(id) }))
+				.map((id) => ({
+					itemId: id,
+					label: itemName(id),
+					description: build.items.find((i) => i.id === id)?.description || undefined
+				}))
 		};
 	}
 

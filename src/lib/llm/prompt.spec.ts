@@ -60,4 +60,14 @@ describe('buildPrompt', () => {
 		expect(systemInstruction).toContain('ITEMS PRESENT HERE');
 		expect(systemInstruction).toContain('keycard');
 	});
+
+	it('includes item descriptions for inventory and giveable items', () => {
+		const { systemInstruction } = buildPrompt(behaviour, [], 'hi', {
+			name: 'Cryo Pod',
+			inventory: [{ name: 'Keycard', description: 'opens maintenance-level doors' }],
+			giveable: [{ itemId: 'crowbar', label: 'Crowbar', description: 'pries sealed hatches' }]
+		});
+		expect(systemInstruction).toContain('- Keycard — opens maintenance-level doors');
+		expect(systemInstruction).toContain('- Crowbar (item "crowbar") — pries sealed hatches');
+	});
 });
