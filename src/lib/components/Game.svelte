@@ -56,6 +56,27 @@
 	let failed = $state(false);
 	let game = $state<GameState>(startGame(placeholderBuild).state);
 
+	// Boot splash: a full-screen, hardcoded-BLACK overlay (independent of the
+	// palette — it also kills the amber flash before the build's settings load)
+	// run once per experience start: page load and every post-ending restart.
+	// Sequence: the gif plays once (static/boot.gif, authored play-once so it
+	// freezes on its last frame) → holds that frame → fades to pure black for a
+	// beat → fades into the live screen.
+	const BOOT_GIF_MS = 4500; // static/boot.gif measured at 4.5s (51 frames)
+	const BOOT_HOLD_MS = 1000; // last frame stays up
+	const BOOT_BLACK_MS = 1000; // pure black between the gif and the game
+	let bootPhase = $state<'gif' | 'black' | 'done'>('gif');
+	let bootGifOk = $state(true);
+	let bootTimers: ReturnType<typeof setTimeout>[] = [];
+	function startBoot() {
+		bootTimers.forEach(clearTimeout);
+		bootPhase = 'gif';
+		bootTimers = [
+			setTimeout(() => (bootPhase = 'black'), BOOT_GIF_MS + BOOT_HOLD_MS),
+			setTimeout(() => (bootPhase = 'done'), BOOT_GIF_MS + BOOT_HOLD_MS + BOOT_BLACK_MS)
+		];
+	}
+
 	type Line = {
 		id: number;
 		who: 'narration' | 'player' | 'computer' | 'system';
@@ -86,12 +107,15 @@
 	// the OPPOSITE palette colour from the UI background, so the blocks separate
 	// clearly from what's behind them.
 	const pageBg = $derived(display.invertUi ? display.bg : display.ui);
-	const frameStyle = $derived.by(() => {
+	// Geometry shared by the game frame and the boot splash (which fills the same
+	// screen area).
+	const framePlacement = $derived.by(() => {
 		const place = display.center
 			? `left:50%;top:50%;transform:translate(-50%,-50%) scale(${scale});transform-origin:center`
 			: `left:${display.marginLeft}px;top:${display.marginTop}px;transform:scale(${scale});transform-origin:top left`;
-		return `${themeStyle(display)};background:${pageBg};width:${display.width}px;height:${display.height}px;${place}`;
+		return `width:${display.width}px;height:${display.height}px;${place}`;
 	});
+	const frameStyle = $derived(`${themeStyle(display)};background:${pageBg};${framePlacement}`);
 	// Refit when the resolution/placement changes (e.g. once the live build loads).
 	$effect(() => {
 		void [display.width, display.height, display.center, display.marginLeft, display.marginTop];
@@ -365,6 +389,7 @@
 	async function restart() {
 		clearEndingTimer();
 		atEnding = false;
+		startBoot(); // the booting animation replays on every fresh run
 		initFrom(build); // picks a fresh random start, resets transcript + state
 		await afterEnter();
 	}
@@ -545,6 +570,7 @@
 	onMount(() => {
 		computeScale();
 		const clockId = setInterval(() => (clockNow = Date.now()), 1000);
+		startBoot();
 		let unsubLive: (() => void) | undefined;
 		// Live-update: when the editor publishes a different version, reload the
 		// whole page so the kiosk picks up new content (and any new app code) —
@@ -600,6 +626,7 @@
 		return () => {
 			cancelAnimationFrame(raf);
 			clearInterval(clockId);
+			bootTimers.forEach(clearTimeout);
 			clearEndingTimer();
 			unsubLive?.();
 		};
@@ -793,16 +820,23 @@
 						/>
 					</form>
 				</section>
-
-				{#if loading}
-					<div class="boot" out:fade={{ duration: 250 }}>
-						<span class="boot-name">ARG-OS</span>
-						<span class="boot-sub">establishing link…<span class="bcur">█</span></span>
-					</div>
-				{/if}
 			</div>
 			<div class="crt" aria-hidden="true" style:background={crtBg}></div>
 		</div>
+
+		{#if bootPhase !== 'done' || loading}
+			<!-- Hardcoded black (never the palette): covers the whole viewport from the
+			     very first SSR paint, so no colour can flash before the build loads.
+			     The gif fills the same area the game screen occupies, fades to pure
+			     black, then the splash itself fades into the live screen. -->
+			<div class="bootsplash" out:fade={{ duration: 400 }}>
+				{#if bootGifOk && bootPhase === 'gif'}
+					<div class="bootframe" style={framePlacement} out:fade={{ duration: 500 }}>
+						<img src="/boot.gif" alt="booting" onerror={() => (bootGifOk = false)} />
+					</div>
+				{/if}
+			</div>
+		{/if}
 	</main>
 {/if}
 
@@ -878,34 +912,23 @@
 		color: var(--ink-dim);
 	}
 
-	/* Boot overlay shown while the active build loads — hides the placeholder
-	   seed until the real build is in. */
-	.boot {
-		position: absolute;
+	/* Fullscreen boot splash: always pure black (palette-independent), shown while
+	   the build loads AND for BOOT_MS on every fresh run. */
+	.bootsplash {
+		position: fixed;
 		inset: 0;
-		z-index: 90;
-		display: flex;
-		flex-direction: column;
-		align-items: center;
-		justify-content: center;
-		gap: 0.5rem;
-		background: var(--bg);
+		z-index: 300;
+		background: #000;
 	}
-	.boot-name {
-		font-family: var(--font-ui);
-		font-weight: 700;
-		letter-spacing: 0.4em;
-		font-size: 1.6rem;
-		color: var(--accent);
-		text-shadow: var(--glow);
+	/* Same geometry as the game frame — the gif fills the screen area exactly. */
+	.bootframe {
+		position: absolute;
+		overflow: hidden;
 	}
-	.boot-sub {
-		font-family: var(--font-terminal);
-		font-size: 0.9rem;
-		color: var(--ink-dim);
-	}
-	.bcur {
-		animation: blink 1.1s steps(1) infinite;
+	.bootframe img {
+		width: 100%;
+		height: 100%;
+		object-fit: cover;
 	}
 
 	/* CRT scanlines + vignette + a faint phosphor flicker over the game frame.
