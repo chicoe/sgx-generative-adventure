@@ -49,7 +49,8 @@
 		position: absolute;
 		inset: 0;
 		overflow: hidden;
-		background: var(--bg);
+		/* transparent so the image blends straight into the frame's backdrop */
+		background: transparent;
 	}
 
 	.layer {
@@ -57,7 +58,10 @@
 		inset: 0;
 		width: 100%;
 		height: 100%;
-		object-fit: cover;
+		/* The whole image stays visible (no cropping), anchored RIGHT — a narrower
+		   image leaves backdrop-coloured space at the left, under the HUD. */
+		object-fit: contain;
+		object-position: right center;
 		will-change: transform;
 	}
 

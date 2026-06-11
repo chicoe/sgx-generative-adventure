@@ -182,15 +182,10 @@
 		<h2>
 			Preview <span class="muted">({display.width} × {display.height}, on a 1080p screen)</span>
 		</h2>
-		<div
-			class="screen"
-			style="width:{PREVIEW_W}px;height:{previewH}px;background:{display.invertUi
-				? display.bg
-				: display.ui}"
-		>
+		<div class="screen" style="width:{PREVIEW_W}px;height:{previewH}px;background:{display.bg}">
 			<div
 				class="pframe"
-				style="{themeStyle(display)};--pfs:{display.fontScale ??
+				style="{themeStyle(display)};background:{display.bg};--pfs:{display.fontScale ??
 					1};width:{fw}px;height:{fh}px;left:{fleft}px;top:{ftop}px"
 			>
 				<div class="pcontent" class:duo={display.mode !== 'full'}>
@@ -391,7 +386,7 @@
 	.pframe {
 		position: absolute;
 		overflow: hidden;
-		background: var(--ink);
+		/* backdrop colour comes from the inline style (always the palette bg) */
 	}
 	.pscene {
 		position: absolute;
@@ -408,7 +403,8 @@
 	/* Matches the runtime: in duotone modes the whole content (monochrome-authored
 	   UI + scene) is colourized by the one filter. */
 	.pcontent.duo {
-		background: var(--ink);
+		/* pure black filters to the palette background regardless of invertUi */
+		background: #000;
 		filter: url(#sgx-duotone-preview);
 	}
 	.pcrt {

@@ -9,6 +9,7 @@
 	import { loadActiveBuild } from '$lib/content/loader';
 	import { doc, onSnapshot } from 'firebase/firestore';
 	import { db } from '$lib/firebase/client';
+	import { MAP_OUTCOME_ID } from '$lib/llm/adjudicate';
 	import { DEFAULT_DISPLAY, themeStyle, duotoneTable, crtBackground } from '$lib/theme';
 	import type { Build, ConversationTurn, Effect, GameState, Item, Scene } from '$lib/engine/types';
 
@@ -103,10 +104,9 @@
 	}
 	// The frame's inline style: theme colours + resolution + placement (centered, or
 	// at the top-left offset by the margins). Scaled to fit, never up past 1:1.
-	// The page around the frame AND the frame's backdrop (behind the UI blocks) use
-	// the OPPOSITE palette colour from the UI background, so the blocks separate
-	// clearly from what's behind them.
-	const pageBg = $derived(display.invertUi ? display.bg : display.ui);
+	// The surround AND the backdrop behind the scene/blocks are ALWAYS the palette
+	// background — invertUi only swaps colours inside the UI blocks themselves.
+	const pageBg = $derived(display.bg);
 	// Geometry shared by the game frame and the boot splash (which fills the same
 	// screen area).
 	const framePlacement = $derived.by(() => {
@@ -175,6 +175,10 @@
 	// Items the computer may give in the current scene THIS run (rolled on entry).
 	let presentGiveables = $state<string[]>([]);
 
+	// The deck plan starts collapsed; it opens via the "0" key, by using an item
+	// with id "map", or when the computer picks the __map__ outcome.
+	let mapOpen = $state(false);
+
 	// Left-hand inventory HUD: the player's items (first 9, mapped to keys 1–9).
 	const itemName = (id: string) => build.items.find((i) => i.id === id)?.name ?? id;
 	const imgUrl = (p: string) =>
@@ -228,10 +232,10 @@
 				...c,
 				label: c.visited ? findScene(build.scenes, c.id)?.name || c.id : '?',
 				x: +(110 + 78 * Math.cos(a)).toFixed(1),
-				y: +(66 + 46 * sin).toFixed(1),
+				y: +(66 + 44 * sin).toFixed(1),
 				// Label above the box only for top-side nodes; below otherwise — never
 				// across the centre box.
-				labelDy: sin < -0.5 ? -11 : 17
+				labelDy: sin < -0.5 ? -13 : 20
 			};
 		});
 	});
@@ -334,6 +338,7 @@
 		convo = []; // a fresh run starts the computer's memory clean
 		greeted = {};
 		cameFromId = null;
+		mapOpen = false;
 		vitalsStartedAt = Date.now(); // a fresh run starts at full(ish) vitals
 		enterScene(b, started.state, started.messages);
 	}
@@ -437,10 +442,14 @@
 				})
 			});
 			if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-			const data: { reply: string; appliedEffects: Effect[] } = await resp.json();
+			const data: { reply: string; outcomeId: string; appliedEffects: Effect[] } =
+				await resp.json();
 
 			push('computer', data.reply);
 			convo = [...convo, { role: 'computer', text: data.reply, behaviourId: behaviour.id }];
+
+			// The computer can put the deck plan on screen (no engine effect involved).
+			if (data.outcomeId === MAP_OUTCOME_ID) mapOpen = true;
 
 			if (data.appliedEffects.length) {
 				const prev = game.currentSceneId;
@@ -514,13 +523,24 @@
 	// Inventory HUD: "use" an item by sending a plain message the computer reads.
 	function useItem(item: Item) {
 		if (pending) return;
+		// The "map" item is a player tool, not a conversation: it opens the deck plan.
+		if (item.id === 'map') {
+			mapOpen = !mapOpen;
+			return;
+		}
 		inputText = `use the ${item.name}`;
 		sendMessage();
 	}
-	// Number keys 1–9 use the matching slot — but only when the player hasn't
-	// started typing, so normal messages (which may contain digits) aren't hijacked.
+	// Number keys 1–9 use the matching slot, 0 toggles the deck plan — but only
+	// when the player hasn't started typing, so normal messages (which may contain
+	// digits) aren't hijacked.
 	function onComposerKey(e: KeyboardEvent) {
 		if (pending || inputText.length > 0) return;
+		if (e.key === '0') {
+			e.preventDefault();
+			mapOpen = !mapOpen;
+			return;
+		}
 		if (e.key >= '1' && e.key <= '9') {
 			const item = inventoryItems[Number(e.key) - 1];
 			if (item) {
@@ -566,6 +586,17 @@
 		if (lines.length && transcriptEl) transcriptEl.scrollTop = transcriptEl.scrollHeight;
 	});
 
+	// Kiosk focus lock: there is no mouse — the composer must always own the
+	// keyboard. Focus it on load, re-focus when it re-enables after a send, and
+	// snap focus back if anything ever steals it.
+	let inputEl = $state<HTMLInputElement>();
+	$effect(() => {
+		if (!pending && !loading) inputEl?.focus();
+	});
+	function refocus() {
+		setTimeout(() => inputEl?.focus(), 0);
+	}
+
 	// Spinning processing cursor while the computer is thinking.
 	$effect(() => {
 		if (!pending) return;
@@ -578,7 +609,9 @@
 	onMount(() => {
 		computeScale();
 		const clockId = setInterval(() => (clockNow = Date.now()), 1000);
-		startBoot();
+		// The boot gif does NOT start here: it waits for the build (palette +
+		// screen geometry) so it never flashes the default colours — the splash
+		// stays pure black until the data is in (startBoot in loadBuild's then).
 		let unsubLive: (() => void) | undefined;
 		// Live-update: when the editor publishes a different version, reload the
 		// whole page so the kiosk picks up new content (and any new app code) —
@@ -610,6 +643,7 @@
 				build = loaded;
 				initFrom(loaded);
 				loading = false; // reveal the resolved build
+				startBoot(); // palette + geometry are real now — run the boot gif
 				afterEnter();
 				watchLive(source === 'firestore' ? `build-${loaded.meta.version}` : null);
 			})
@@ -703,7 +737,23 @@
 				</header>
 
 				<div class="mid">
-					<aside class="sidebar">
+					<div class="stage">
+						{#key game.currentSceneId}
+							{@const snap = findScene(build.scenes, game.currentSceneId)!}
+							<div class="scene-holder" in:fade={{ duration: 450 }} out:fade={{ duration: 300 }}>
+								{#if sceneHasArt(snap)}
+									<SceneRenderer scene={snap} {look} />
+								{:else}
+									<div class="nosignal" aria-label="no signal">
+										<div class="static"></div>
+										<span class="nosignal-text">NO SIGNAL</span>
+									</div>
+								{/if}
+							</div>
+						{/key}
+					</div>
+
+					<div class="hud">
 						<div class="inventory" aria-label="inventory">
 							{#each Array.from({ length: 9 }) as _slot, idx (idx)}
 								{@const item = inventoryItems[idx]}
@@ -728,70 +778,57 @@
 							{/each}
 						</div>
 
+						<!-- Always present: collapsed = just the title bar, so players know it's there. -->
 						<div class="map" aria-label="deck plan">
-							<div class="map-title">DECK PLAN</div>
-							<svg class="map-svg" viewBox="0 0 220 140" preserveAspectRatio="xMidYMid meet">
-								<!-- corridors first, under the room boxes -->
-								{#each mapNodes as n (n.id)}
-									<line class="ml" class:locked={n.locked} x1="110" y1="66" x2={n.x} y2={n.y} />
-								{/each}
-								{#each mapNodes as n (n.id)}
-									<rect
-										class="mr"
-										class:unknown={!n.visited}
-										x={n.x - 11}
-										y={n.y - 7}
-										width="22"
-										height="14"
-									/>
-									<text
-										class="mt"
-										class:unknown={!n.visited}
-										x={n.x}
-										y={n.y + n.labelDy}
-										text-anchor="middle">{shortName(n.label, 10)}</text
+							<div class="map-title">DECK PLAN · [0]</div>
+							{#if mapOpen}
+								<svg class="map-svg" viewBox="0 0 220 140" preserveAspectRatio="xMidYMid meet">
+									<!-- corridors first, under the room boxes -->
+									{#each mapNodes as n (n.id)}
+										<line class="ml" class:locked={n.locked} x1="110" y1="66" x2={n.x} y2={n.y} />
+									{/each}
+									{#each mapNodes as n (n.id)}
+										<rect
+											class="mr"
+											class:unknown={!n.visited}
+											x={n.x - 16}
+											y={n.y - 10}
+											width="32"
+											height="20"
+										/>
+										<text
+											class="mt"
+											class:unknown={!n.visited}
+											x={n.x}
+											y={n.y + n.labelDy}
+											text-anchor="middle">{shortName(n.label, 10)}</text
+										>
+										{#if n.locked}
+											<!-- padlock badge, centred in the room box -->
+											<g class="mlock" transform="translate({n.x - 6}, {n.y - 7.2}) scale(1.5)">
+												<path d="M2 4 V2.5 A2 2 0 0 1 6 2.5 V4" />
+												<rect x="0.8" y="4" width="6.4" height="5" />
+											</g>
+										{/if}
+									{/each}
+									<!-- current room: big, outline only, name inside -->
+									<rect class="mcur" x="68" y="41" width="84" height="50" />
+									<text class="mt cur" x="110" y="70" text-anchor="middle"
+										>{shortName(scene.name, 12)}</text
 									>
-									{#if n.locked}
-										<!-- padlock badge, centred in the room box -->
-										<g class="mlock" transform="translate({n.x - 4}, {n.y - 4.8})">
-											<path d="M2 4 V2.5 A2 2 0 0 1 6 2.5 V4" />
-											<rect x="0.8" y="4" width="6.4" height="5" />
-										</g>
+									{#if itemsHere}
+										<circle class="map-hint" cx="146" cy="46" r="3.5">
+											<title>sensors detect loose items here</title>
+										</circle>
 									{/if}
-								{/each}
-								<!-- current room: big, outline only, name inside -->
-								<rect class="mcur" x="78" y="46" width="64" height="40" />
-								<text class="mt cur" x="110" y="69" text-anchor="middle"
-									>{shortName(scene.name, 12)}</text
-								>
-								{#if itemsHere}
-									<circle class="map-hint" cx="138" cy="50" r="3">
-										<title>sensors detect loose items here</title>
-									</circle>
-								{/if}
-								{#if !mapNodes.length}
-									<text class="mt unknown" x="110" y="108" text-anchor="middle"
-										>no routes detected</text
-									>
-								{/if}
-							</svg>
+									{#if !mapNodes.length}
+										<text class="mt unknown" x="110" y="108" text-anchor="middle"
+											>no routes detected</text
+										>
+									{/if}
+								</svg>
+							{/if}
 						</div>
-					</aside>
-
-					<div class="stage">
-						{#key game.currentSceneId}
-							{@const snap = findScene(build.scenes, game.currentSceneId)!}
-							<div class="scene-holder" in:fade={{ duration: 450 }} out:fade={{ duration: 300 }}>
-								{#if sceneHasArt(snap)}
-									<SceneRenderer scene={snap} {look} />
-								{:else}
-									<div class="nosignal" aria-label="no signal">
-										<div class="static"></div>
-										<span class="nosignal-text">NO SIGNAL</span>
-									</div>
-								{/if}
-							</div>
-						{/key}
 					</div>
 				</div>
 
@@ -821,10 +858,11 @@
 						<span class="prompt">&gt;</span>
 						<input
 							use:autofocus
+							bind:this={inputEl}
 							placeholder={atEnding ? 'type anything to play again…' : 'type to the computer…'}
 							bind:value={inputText}
 							onkeydown={onComposerKey}
-							disabled={pending}
+							onblur={refocus}
 						/>
 					</form>
 				</section>
@@ -835,12 +873,18 @@
 		{#if bootPhase !== 'done' || loading}
 			<!-- Hardcoded black (never the palette): covers the whole viewport from the
 			     very first SSR paint, so no colour can flash before the build loads.
-			     The gif fills the same area the game screen occupies, fades to pure
-			     black, then the splash itself fades into the live screen. -->
-			<div class="bootsplash" out:fade={{ duration: 400 }}>
-				{#if bootGifOk && bootPhase === 'gif'}
+			     The gif fills the same area the game screen occupies (cropped to it,
+			     palette-tinted, under the CRT overlay), fades to the palette
+			     background, then the splash itself fades into the live screen. -->
+			<div
+				class="bootsplash"
+				style:background={loading ? '#000' : pageBg}
+				out:fade={{ duration: 400 }}
+			>
+				{#if bootGifOk && !loading && bootPhase === 'gif'}
 					<div class="bootframe" style={framePlacement} out:fade={{ duration: 500 }}>
 						<img src="/boot.gif" alt="booting" onerror={() => (bootGifOk = false)} />
+						<div class="crt" style:background={crtBg}></div>
 					</div>
 				{/if}
 			</div>
@@ -873,7 +917,7 @@
 	.frame {
 		position: absolute;
 		overflow: hidden;
-		/* backdrop colour comes from the inline frameStyle (the inverted pageBg) */
+		/* backdrop colour comes from the inline frameStyle (always the palette bg) */
 	}
 	/* Solid-bar layout: constant-height top + bottom bars (px-sized, immune to the
 	   font multiplier), and a middle row where the 4:3 scene takes the full height
@@ -884,14 +928,14 @@
 		inset: 0;
 		display: flex;
 		flex-direction: column;
-		gap: 10px;
+		/* no gap: header > scene > chatbox stack flush vertically */
 		padding: 12px;
 	}
 	.mid {
+		position: relative;
 		flex: 1;
 		min-height: 0;
 		display: flex;
-		gap: 10px;
 	}
 	/* Duotone modes: the UI inside .content is authored in MONOCHROME (themeVars
 	   emits white-on-black) and this one filter colourizes everything — scene art
@@ -899,9 +943,10 @@
 	   the frame can be off-palette or mismatch the scene. The .crt overlay stays a
 	   SIBLING (outside the filter), applied after quantization. */
 	.content.duo {
-		/* The backdrop is the INK endpoint: the filter maps it to the ui colour —
-		   the same colour as the surround — so blocks separate in duotone too. */
-		background: var(--ink);
+		/* The backdrop is pure black: the duotone table maps luminance 0 to the
+		   palette BACKGROUND regardless of invertUi — same colour as the surround,
+		   so the backdrop is always the bg colour in every mode. */
+		background: #000;
 		filter: url(#sgx-duotone);
 	}
 	/* Semantic non-palette colours (CRITICAL red, the LED) would otherwise
@@ -920,8 +965,9 @@
 		color: var(--ink-dim);
 	}
 
-	/* Fullscreen boot splash: always pure black (palette-independent), shown while
-	   the build loads AND for BOOT_MS on every fresh run. */
+	/* Fullscreen boot splash: pure black while the build loads (no palette yet),
+	   then the palette background around the gif and during the post-gif beat
+	   (inline style). The fallback stays #000 for SSR/first paint. */
 	.bootsplash {
 		position: fixed;
 		inset: 0;
@@ -937,6 +983,10 @@
 		width: 100%;
 		height: 100%;
 		object-fit: cover;
+		/* Palette-match the gif: grayscale first, then the same duotone colour map
+		   as the screen (smooth ramp in full/gradient mode, hard two-colour in pure
+		   duotone — duoFunc decides). Black maps to the palette bg, white to ui. */
+		filter: grayscale(1) url(#sgx-duotone);
 	}
 
 	/* CRT scanlines + vignette + a faint phosphor flicker over the game frame.
@@ -967,18 +1017,18 @@
 		}
 	}
 
-	/* The scene: full middle-row height, strict 4:3, flush against the right edge
-	   (last flex child; the sidebar absorbs all leftover width). The image fills
-	   the box (SceneRenderer layers are object-fit: cover). */
+	/* The scene: fills the whole middle row, borderless so the image blends into
+	   the backdrop. The image fits INSIDE it (whole image visible, anchored RIGHT
+	   — SceneRenderer layers are object-fit: contain). HUD floats over the
+	   leftover space on the left. */
 	.stage {
 		position: relative;
-		flex: none;
-		height: 100%;
-		aspect-ratio: 4 / 3;
-		max-width: 100%;
+		flex: 1;
+		min-width: 0;
 		overflow: hidden;
-		border: 1px solid var(--line);
-		box-shadow: 0 0 60px rgba(255, 176, 0, 0.05) inset;
+		/* transparent: the backdrop behind the image is the frame's (always the
+		   palette bg — in duotone the .content.duo black filters to it) */
+		background: transparent;
 	}
 	.scene-holder {
 		position: absolute;
@@ -991,7 +1041,7 @@
 		inset: 0;
 		display: grid;
 		place-items: center;
-		background: var(--bg);
+		background: transparent;
 		overflow: hidden;
 	}
 	.static {
@@ -1138,23 +1188,23 @@
 		box-shadow: 0 0 8px #46b4ff;
 	}
 
-	/* Left sidebar: absorbs ALL the width the 4:3 scene doesn't use; the inventory
-	   grows to fill it (slots as big as the space allows, capped by the row height
-	   via container units so the 3×3 grid never overflows vertically). */
-	.sidebar {
-		flex: 1;
-		min-width: 0;
-		container-type: size;
+	/* HUD column floating over the scene's top-left corner: inventory on top,
+	   deck plan right below it. */
+	.hud {
+		position: absolute;
+		top: 10px;
+		left: 10px;
+		z-index: 40;
 		display: flex;
 		flex-direction: column;
 		gap: 10px;
+		align-items: flex-start;
 	}
-	/* Inventory: 3×3 slots mapped to number keys 1–9 (capped to ~60% of the
-	   sidebar height so the map keeps the space below it). */
+
+	/* Inventory: a 3×3 grid (keys 1–9; rem-sized so the font multiplier scales it). */
 	.inventory {
-		width: min(100%, 58cqh);
 		display: grid;
-		grid-template-columns: repeat(3, 1fr);
+		grid-template-columns: repeat(3, 3.1rem);
 		gap: 6px;
 		padding: 8px;
 		background: var(--overlay-bg);
@@ -1162,14 +1212,15 @@
 		box-shadow: 0 0 18px rgba(255, 176, 0, 0.05);
 	}
 
-	/* Local map: top-view schematic — current room centred, connected rooms on a
-	   ring with corridor lines. */
+	/* Deck plan: always present right below the inventory — collapsed it's just
+	   the title bar; open (0 / the map item / the computer) it expands to the
+	   same width as the inventory. */
 	.map {
-		flex: 1;
-		min-height: 0;
+		/* match the inventory: 3×3.1rem slots + 2×6px gaps + 2×8px padding */
+		width: calc(9.3rem + 28px);
 		display: flex;
 		flex-direction: column;
-		padding: 8px 12px;
+		padding: 6px 8px;
 		background: var(--overlay-bg);
 		border: 1px solid var(--line);
 		box-shadow: 0 0 18px rgba(255, 176, 0, 0.05);
@@ -1179,12 +1230,11 @@
 		font-size: 11px;
 		letter-spacing: 0.14em;
 		color: var(--ink-dim);
-		margin-bottom: 4px;
 	}
 	.map-svg {
-		flex: 1;
-		min-height: 0;
 		width: 100%;
+		aspect-ratio: 220 / 140;
+		margin-top: 2px;
 	}
 	.ml {
 		stroke: var(--ink-dim);
@@ -1218,10 +1268,11 @@
 	.mt {
 		fill: var(--ink);
 		font-family: var(--font-terminal);
-		font-size: 9px;
+		font-size: 10px;
 	}
 	.mt.cur {
 		font-weight: 700;
+		font-size: 11px;
 		text-transform: uppercase;
 	}
 	.mt.unknown {

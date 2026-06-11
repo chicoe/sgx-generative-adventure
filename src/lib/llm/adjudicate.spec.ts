@@ -5,7 +5,8 @@ import {
 	resolveEffects,
 	withSyntheticOutcomes,
 	isSyntheticOutcomeId,
-	NEUTRAL_OUTCOME_ID
+	NEUTRAL_OUTCOME_ID,
+	MAP_OUTCOME_ID
 } from './adjudicate';
 import type { LLMBehaviour } from '../engine/types';
 
@@ -63,6 +64,14 @@ describe('withSyntheticOutcomes', () => {
 		expect(neutral?.granted).toBe(false);
 		expect(neutral?.effects).toEqual([]);
 		expect(isSyntheticOutcomeId(NEUTRAL_OUTCOME_ID)).toBe(true);
+	});
+
+	it('always adds a show-the-map outcome (no effects — client-side reaction)', () => {
+		const aug = withSyntheticOutcomes(behaviour, []);
+		const map = findOutcome(aug, MAP_OUTCOME_ID);
+		expect(map?.granted).toBe(true);
+		expect(map?.effects).toEqual([]);
+		expect(isSyntheticOutcomeId(MAP_OUTCOME_ID)).toBe(true);
 	});
 
 	it('adds one granted goToScene outcome per exit', () => {

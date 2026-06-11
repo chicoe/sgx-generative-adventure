@@ -33,6 +33,8 @@ const EXIT_OUTCOME_PREFIX = 'exit:';
 const GRANT_OUTCOME_PREFIX = 'grant:';
 const UNLOCK_OUTCOME_PREFIX = 'unlock:';
 export const NEUTRAL_OUTCOME_ID = '__none__';
+// No effects — the client reacts to this id by opening the deck-plan overlay.
+export const MAP_OUTCOME_ID = '__map__';
 
 /** True for a synthesized "take the player through an exit" outcome. */
 export function isExitOutcomeId(id: string): boolean {
@@ -49,10 +51,11 @@ export function isUnlockOutcomeId(id: string): boolean {
 	return id.startsWith(UNLOCK_OUTCOME_PREFIX);
 }
 
-/** Synthesized outcomes (neutral/exits/grants/unlocks) never carry behaviour-level effects. */
+/** Synthesized outcomes (neutral/map/exits/grants/unlocks) never carry behaviour-level effects. */
 export function isSyntheticOutcomeId(id: string): boolean {
 	return (
 		id === NEUTRAL_OUTCOME_ID ||
+		id === MAP_OUTCOME_ID ||
 		isExitOutcomeId(id) ||
 		isGrantOutcomeId(id) ||
 		isUnlockOutcomeId(id)
@@ -84,6 +87,15 @@ export function withSyntheticOutcomes(
 			effects: []
 		});
 		ids.add(NEUTRAL_OUTCOME_ID);
+	}
+	if (!ids.has(MAP_OUTCOME_ID)) {
+		extra.push({
+			id: MAP_OUTCOME_ID,
+			label: 'Show the deck plan / map on the player’s screen (when they ask to see a map)',
+			granted: true,
+			effects: []
+		});
+		ids.add(MAP_OUTCOME_ID);
 	}
 	for (const e of exits) {
 		const id = `${EXIT_OUTCOME_PREFIX}${e.toSceneId}`;

@@ -40,6 +40,12 @@ describe('buildPrompt', () => {
 		expect(buildPrompt(behaviour, [], 'x').userPrompt).toContain('(no prior turns)');
 	});
 
+	it('tells the model the deck plan display works (the "__map__" outcome)', () => {
+		const { systemInstruction } = buildPrompt(behaviour, [], 'show me the map');
+		expect(systemInstruction).toContain('"__map__"');
+		expect(systemInstruction).toContain('Never claim you have no map');
+	});
+
 	it('describes sealed routes with what opens them (info only)', () => {
 		const { systemInstruction } = buildPrompt(behaviour, [], 'hi', {
 			name: 'Cryo Pod',
