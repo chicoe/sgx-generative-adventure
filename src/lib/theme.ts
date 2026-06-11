@@ -7,9 +7,9 @@ import type { DisplaySettings } from './engine/types';
 export const DEFAULT_DISPLAY: DisplaySettings = {
 	width: 1280,
 	height: 720,
-	center: true,
-	marginLeft: 0,
-	marginTop: 0,
+	offsetX: 0,
+	offsetY: 0,
+	backdrop: '#000000',
 	bg: '#0a0805',
 	ui: '#ffb000',
 	mode: 'full',

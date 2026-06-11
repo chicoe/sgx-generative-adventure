@@ -108,9 +108,16 @@ export const llmBehaviourSchema = z.object({
 export const displaySettingsSchema = z.object({
 	width: z.number().int().min(160).max(7680),
 	height: z.number().int().min(160).max(4320),
-	center: z.boolean(),
-	marginLeft: z.number().int().min(0).max(4320),
-	marginTop: z.number().int().min(0).max(4320),
+	offsetX: z.number().int().min(-7680).max(7680).optional(),
+	offsetY: z.number().int().min(-4320).max(4320).optional(),
+	backdrop: z
+		.string()
+		.regex(/^#[0-9a-fA-F]{6}$/)
+		.optional(),
+	// Legacy placement (pre-offset builds) — still accepted, ignored by the runtime.
+	center: z.boolean().optional(),
+	marginLeft: z.number().int().min(0).max(4320).optional(),
+	marginTop: z.number().int().min(0).max(4320).optional(),
 	bg: z.string().regex(/^#[0-9a-fA-F]{6}$/),
 	ui: z.string().regex(/^#[0-9a-fA-F]{6}$/),
 	mode: z.enum(['full', 'gradient', 'duotone']),

@@ -98,27 +98,30 @@
 	const crtBg = $derived(crtBackground(display.crt));
 	let scale = $state(1);
 	function computeScale() {
-		const availW = window.innerWidth - (display.center ? 0 : display.marginLeft);
-		const availH = window.innerHeight - (display.center ? 0 : display.marginTop);
-		scale = Math.min(1, availW / display.width, availH / display.height);
+		scale = Math.min(1, window.innerWidth / display.width, window.innerHeight / display.height);
 	}
-	// The frame's inline style: theme colours + resolution + placement (centered, or
-	// at the top-left offset by the margins). Scaled to fit, never up past 1:1.
-	// The surround AND the backdrop behind the scene/blocks are ALWAYS the palette
-	// background — invertUi only swaps colours inside the UI blocks themselves.
+	// The frame's inline style: theme colours + resolution + placement. The window
+	// is ALWAYS centered, nudged by the x/y offsets (screen px, negative = left/up).
+	// Scaled to fit, never up past 1:1.
+	// The backdrop behind the scene/blocks (inside the window) is ALWAYS the
+	// palette background — invertUi only swaps colours inside the UI blocks.
 	const pageBg = $derived(display.bg);
+	// Everything OUTSIDE the window: the author's backdrop colour (default black).
+	const backdrop = $derived(display.backdrop ?? '#000000');
 	// Geometry shared by the game frame and the boot splash (which fills the same
 	// screen area).
 	const framePlacement = $derived.by(() => {
-		const place = display.center
-			? `left:50%;top:50%;transform:translate(-50%,-50%) scale(${scale});transform-origin:center`
-			: `left:${display.marginLeft}px;top:${display.marginTop}px;transform:scale(${scale});transform-origin:top left`;
-		return `width:${display.width}px;height:${display.height}px;${place}`;
+		const ox = display.offsetX ?? 0;
+		const oy = display.offsetY ?? 0;
+		return (
+			`width:${display.width}px;height:${display.height}px;left:50%;top:50%;` +
+			`transform:translate(calc(-50% + ${ox}px), calc(-50% + ${oy}px)) scale(${scale});transform-origin:center`
+		);
 	});
 	const frameStyle = $derived(`${themeStyle(display)};background:${pageBg};${framePlacement}`);
-	// Refit when the resolution/placement changes (e.g. once the live build loads).
+	// Refit when the resolution changes (e.g. once the live build loads).
 	$effect(() => {
-		void [display.width, display.height, display.center, display.marginLeft, display.marginTop];
+		void [display.width, display.height];
 		computeScale();
 	});
 	// Font-size multiplier: rem-sized text (chat, items) scales with the root
@@ -682,7 +685,7 @@
 	<!-- Discrete fail page: never placeholder content, never the palette. -->
 	<main class="failpage"><span>please restart</span></main>
 {:else}
-	<main class="letterbox" style:background={pageBg}>
+	<main class="letterbox" style:background={backdrop}>
 		<!-- Duotone luminance map (dark → bg, light → ui) for the "old monitor" mode. -->
 		<svg width="0" height="0" aria-hidden="true" style="position:absolute">
 			<filter id="sgx-duotone" color-interpolation-filters="sRGB">
@@ -874,16 +877,26 @@
 			<!-- Hardcoded black (never the palette): covers the whole viewport from the
 			     very first SSR paint, so no colour can flash before the build loads.
 			     The gif fills the same area the game screen occupies (cropped to it,
-			     palette-tinted, under the CRT overlay), fades to the palette
-			     background, then the splash itself fades into the live screen. -->
+			     palette-tinted, under the CRT overlay), fades to the bg-coloured
+			     window (CRT still on), then the splash fades into the live screen;
+			     everything outside the window is the backdrop colour. -->
 			<div
 				class="bootsplash"
-				style:background={loading ? '#000' : pageBg}
+				style:background={loading ? '#000' : backdrop}
 				out:fade={{ duration: 400 }}
 			>
-				{#if bootGifOk && !loading && bootPhase === 'gif'}
-					<div class="bootframe" style={framePlacement} out:fade={{ duration: 500 }}>
-						<img src="/boot.gif" alt="booting" onerror={() => (bootGifOk = false)} />
+				{#if !loading}
+					<!-- The window area keeps its bg colour + CRT for the WHOLE boot —
+					     the gif fades out over it into the post-gif beat. -->
+					<div class="bootframe" style="{framePlacement};background:{pageBg}">
+						{#if bootGifOk && bootPhase === 'gif'}
+							<img
+								src="/boot.gif"
+								alt="booting"
+								onerror={() => (bootGifOk = false)}
+								out:fade={{ duration: 500 }}
+							/>
+						{/if}
 						<div class="crt" style:background={crtBg}></div>
 					</div>
 				{/if}
@@ -966,8 +979,8 @@
 	}
 
 	/* Fullscreen boot splash: pure black while the build loads (no palette yet),
-	   then the palette background around the gif and during the post-gif beat
-	   (inline style). The fallback stays #000 for SSR/first paint. */
+	   then the author's backdrop colour outside the bg-coloured window (inline
+	   styles). The fallback stays #000 for SSR/first paint. */
 	.bootsplash {
 		position: fixed;
 		inset: 0;

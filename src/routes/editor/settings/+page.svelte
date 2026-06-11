@@ -36,8 +36,12 @@
 				...$state.snapshot(display),
 				width: Math.round(display.width) || DEFAULT_DISPLAY.width,
 				height: Math.round(display.height) || DEFAULT_DISPLAY.height,
-				marginLeft: Math.max(0, Math.round(display.marginLeft) || 0),
-				marginTop: Math.max(0, Math.round(display.marginTop) || 0)
+				offsetX: Math.round(display.offsetX ?? 0) || 0,
+				offsetY: Math.round(display.offsetY ?? 0) || 0,
+				// Legacy placement fields are dropped on save (undefined-safe writer).
+				center: undefined,
+				marginLeft: undefined,
+				marginTop: undefined
 			});
 			draftStatus.markDirty();
 			message = 'Saved to the draft. Publish to apply it to the live game.';
@@ -58,8 +62,8 @@
 	const fit = $derived(Math.min(1, REF_W / (display.width || 1), REF_H / (display.height || 1)));
 	const fw = $derived(display.width * fit * k);
 	const fh = $derived(display.height * fit * k);
-	const fleft = $derived(display.center ? (PREVIEW_W - fw) / 2 : display.marginLeft * k);
-	const ftop = $derived(display.center ? (previewH - fh) / 2 : display.marginTop * k);
+	const fleft = $derived((PREVIEW_W - fw) / 2 + (display.offsetX ?? 0) * k);
+	const ftop = $derived((previewH - fh) / 2 + (display.offsetY ?? 0) * k);
 	const dt = $derived(duotoneTable(display.bg, display.ui));
 	const duoFunc = $derived(display.mode === 'duotone' ? 'discrete' : 'table');
 	const pcrtBg = $derived(crtBackground(display.crt));
@@ -84,19 +88,13 @@
 
 		<fieldset>
 			<legend>placement</legend>
-			<label class="chk"
-				><input type="checkbox" bind:checked={display.center} /> center on screen</label
-			>
-			<div class="row" class:disabled={display.center}>
-				<label class="num"
-					>left margin
-					<input type="number" min="0" bind:value={display.marginLeft} disabled={display.center} />
-				</label>
-				<label class="num"
-					>top margin
-					<input type="number" min="0" bind:value={display.marginTop} disabled={display.center} />
-				</label>
+			<div class="row">
+				<label class="num">x offset <input type="number" bind:value={display.offsetX} /></label>
+				<label class="num">y offset <input type="number" bind:value={display.offsetY} /></label>
 			</div>
+			<span class="muted small"
+				>always centered; the offsets nudge the window in px (negative = left / up)</span
+			>
 		</fieldset>
 
 		<fieldset>
@@ -108,7 +106,13 @@
 				<label class="color"
 					>ui / ink <input type="color" bind:value={display.ui} /><code>{display.ui}</code></label
 				>
+				<label class="color"
+					>backdrop <input type="color" bind:value={display.backdrop} /><code
+						>{display.backdrop}</code
+					></label
+				>
 			</div>
+			<span class="muted small">backdrop = everything outside the game window</span>
 			<div class="presets">
 				{#each COLOR_PRESETS as p (p.name)}
 					<button
@@ -182,7 +186,10 @@
 		<h2>
 			Preview <span class="muted">({display.width} × {display.height}, on a 1080p screen)</span>
 		</h2>
-		<div class="screen" style="width:{PREVIEW_W}px;height:{previewH}px;background:{display.bg}">
+		<div
+			class="screen"
+			style="width:{PREVIEW_W}px;height:{previewH}px;background:{display.backdrop ?? '#000000'}"
+		>
 			<div
 				class="pframe"
 				style="{themeStyle(display)};background:{display.bg};--pfs:{display.fontScale ??
@@ -271,9 +278,6 @@
 		display: flex;
 		gap: 0.8rem;
 		flex-wrap: wrap;
-	}
-	.row.disabled {
-		opacity: 0.45;
 	}
 	label {
 		font-size: 0.78rem;

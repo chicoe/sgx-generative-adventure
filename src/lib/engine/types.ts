@@ -148,9 +148,15 @@ export interface GameState {
 export interface DisplaySettings {
 	width: number; // gameplay resolution, px
 	height: number;
-	center: boolean; // center on screen (ignores the margins below) vs. top-left + margins
-	marginLeft: number; // px from the left edge when not centered
-	marginTop: number; // px from the top edge when not centered
+	// The window is ALWAYS centered; the offsets nudge it from the screen centre
+	// in px (negative = left/up).
+	offsetX?: number;
+	offsetY?: number;
+	backdrop?: string; // colour of everything OUTSIDE the window (hex; default #000000)
+	// Legacy placement fields (pre-offset builds) — ignored by the runtime.
+	center?: boolean;
+	marginLeft?: number;
+	marginTop?: number;
 	bg: string; // background colour (hex)
 	ui: string; // UI / ink colour (hex)
 	// full colour · duotone gradient (luminance map) · duotone (hard two-colour, no in-betweens)
