@@ -78,151 +78,6 @@
 		];
 	}
 
-	// --- intake questionnaire (the intro page) ---------------------------------
-	// After the boot gif, before the game: a bg-coloured page where the computer
-	// asks a fixed set of questions, one at a time. Text questions confirm with
-	// ENTER, scale questions answer with a 1–9 key, ESC skips the rest. The
-	// answers — or the fact the player skipped — become a system ground-truth
-	// turn the computer keeps for the whole run.
-	type IntroQuestion =
-		| { prompt: string; kind: 'text' }
-		| { prompt: string; kind: 'scale'; low: string; high: string };
-	const INTRO_QUESTIONS: IntroQuestion[] = [
-		{ prompt: 'STATE YOUR NAME', kind: 'text' },
-		{ prompt: 'DESCRIBE YOUR PREFERRED CLIMATE', kind: 'text' },
-		{ prompt: 'SOCIAL PREFERENCE', kind: 'scale', low: 'SOLITUDE', high: 'DENSE POPULATION' },
-		{ prompt: 'GRAVITY ADAPTABILITY', kind: 'scale', low: 'LOW', high: 'HIGH' },
-		{ prompt: 'ACCEPTABLE LEVEL OF PERSONAL RISK', kind: 'scale', low: 'LOW', high: 'HIGH' },
-		{ prompt: 'DESCRIBE YOUR IDEAL ENVIRONMENT', kind: 'text' },
-		{ prompt: 'WHAT DO YOU FEAR MOST?', kind: 'text' }
-	];
-	let introActive = $state(false);
-	let introFading = $state(false); // bg-coloured cover between the form and the game
-	const INTRO_FADE_MS = 600;
-	let introStep = $state(0);
-	let introAnswer = $state('');
-	let introAnswers: { q: IntroQuestion; a: string }[] = [];
-	let introInputEl = $state<HTMLInputElement>();
-	// The intro's own terminal transcript (same Line shape + typing effect as the
-	// chatbox — questions type out, answers echo, history scrolls up).
-	let introLines = $state<Line[]>([]);
-	let introScrollEl = $state<HTMLDivElement>();
-	// The questionnaire system turn — pinned so history slicing never drops it.
-	let profileTurn: ConversationTurn | null = null;
-
-	function beginIntro() {
-		introActive = true;
-		introFading = false;
-		introStep = 0;
-		introAnswer = '';
-		introAnswers = [];
-		introLines = []; // seeded once the boot splash is gone (effect below)
-		introQuestionLineId = -1;
-	}
-
-	// The line id of the question currently awaiting an answer — highlighted the
-	// same way the chatbox highlights the latest computer reply.
-	let introQuestionLineId = $state(-1);
-
-	function pushIntro(who: Line['who'], text: string): number {
-		const instant = who === 'player' || who === 'system';
-		const line: Line = { id: lineSeq++, who, text, revealed: instant ? text.length : 0 };
-		introLines = [...introLines, line];
-		if (!instant) typeOut(line.id);
-		return line.id;
-	}
-
-	function askIntroQuestion() {
-		const q = INTRO_QUESTIONS[introStep];
-		pushIntro('system', `${introStep + 1} OF ${INTRO_QUESTIONS.length}`);
-		introQuestionLineId = pushIntro('computer', q.prompt);
-		if (q.kind === 'scale') pushIntro('computer', `${q.low} [ 1 2 3 4 5 6 7 8 9 ] ${q.high}`);
-	}
-
-	// Start the dialogue only once the boot splash is gone, so the player
-	// actually sees the first question type out (not already finished).
-	$effect(() => {
-		if (introActive && !loading && bootPhase === 'done' && introLines.length === 0) {
-			pushIntro('computer', 'PLEASE, ANSWER THE FOLLOWING QUESTIONS:');
-			pushIntro('system', '[ ENTER confirms · ESC skips ]');
-			askIntroQuestion();
-		}
-	});
-
-	function introProfileText(skipped: boolean): string {
-		if (!introAnswers.length)
-			return 'STATE UPDATE: the player SKIPPED the intake questionnaire — no profile answers on file.';
-		const parts = introAnswers.map(({ q, a }) =>
-			q.kind === 'scale' ? `${q.prompt} (1=${q.low} … 9=${q.high}): ${a}` : `${q.prompt}: "${a}"`
-		);
-		return (
-			`STATE UPDATE: intake questionnaire — the player answered: ${parts.join('; ')}.` +
-			(skipped ? ' The player skipped the remaining questions.' : '') +
-			' These are their own words — remember them (especially their name).'
-		);
-	}
-
-	function finishIntro(skipped: boolean) {
-		if (introFading) return; // already on the way out
-		const turn: ConversationTurn = {
-			role: 'system',
-			text: introProfileText(skipped),
-			behaviourId: activeBehaviourId ?? ''
-		};
-		profileTurn = turn;
-		convo = [...convo, turn];
-		// Fade to the background colour over the form, swap to the game underneath,
-		// then fade the cover away into it.
-		introFading = true;
-		setTimeout(() => {
-			introActive = false;
-			vitalsStartedAt = Date.now(); // the countdown starts with the game, not the form
-			void afterEnter();
-			setTimeout(() => (introFading = false), 250);
-		}, INTRO_FADE_MS + 150);
-	}
-
-	function introRecord(a: string) {
-		pushIntro('player', a);
-		introAnswers.push({ q: INTRO_QUESTIONS[introStep], a });
-		introAnswer = '';
-		if (introStep + 1 >= INTRO_QUESTIONS.length) finishIntro(false);
-		else {
-			introStep += 1;
-			askIntroQuestion();
-		}
-	}
-
-	// All intro keys arrive via the window handler (text input keys bubble up).
-	function onIntroKey(e: KeyboardEvent) {
-		if (introFading) return; // the form is done — ignore input during the fade
-		const q = INTRO_QUESTIONS[introStep];
-		if (e.key === 'Escape') {
-			e.preventDefault();
-			finishIntro(true);
-			return;
-		}
-		if (q.kind === 'scale' && e.key >= '1' && e.key <= '9') {
-			e.preventDefault();
-			introRecord(e.key);
-			return;
-		}
-		if (q.kind === 'text' && e.key === 'Enter') {
-			e.preventDefault();
-			const a = introAnswer.trim();
-			if (a) introRecord(a);
-		}
-	}
-
-	// Keep the answer field focused (kiosk: no mouse) for the whole questionnaire.
-	$effect(() => {
-		if (introActive && !loading) introInputEl?.focus();
-	});
-	// Keep the intro transcript pinned to the newest line.
-	$effect(() => {
-		if (introLines.length && introScrollEl) introScrollEl.scrollTop = introScrollEl.scrollHeight;
-	});
-
 	type Line = {
 		id: number;
 		who: 'narration' | 'player' | 'computer' | 'system';
@@ -403,20 +258,17 @@
 
 	function typeOut(id: number) {
 		if (typeof window === 'undefined') return; // browser only (no SSR timer leak)
-		// Lines live in the chat transcript or the intro's — ids are shared.
-		const find = () => lines.find((l) => l.id === id) ?? introLines.find((l) => l.id === id);
-		const target = find();
+		const target = lines.find((l) => l.id === id);
 		if (!target) return;
 		const step = Math.max(1, Math.ceil(target.text.length / 100));
 		const tick = setInterval(() => {
-			const l = find();
+			const l = lines.find((x) => x.id === id);
 			if (!l) {
 				clearInterval(tick);
 				return;
 			}
 			l.revealed = Math.min(l.text.length, l.revealed + step);
 			if (transcriptEl) transcriptEl.scrollTop = transcriptEl.scrollHeight;
-			if (introScrollEl) introScrollEl.scrollTop = introScrollEl.scrollHeight;
 			if (l.revealed >= l.text.length) clearInterval(tick);
 		}, 16);
 	}
@@ -487,19 +339,11 @@
 		game = started.state;
 		lines = [];
 		convo = []; // a fresh run starts the computer's memory clean
-		profileTurn = null;
 		greeted = {};
 		cameFromId = null;
 		mapOpen = false;
 		vitalsStartedAt = Date.now(); // a fresh run starts at full(ish) vitals
 		enterScene(b, started.state, started.messages);
-	}
-
-	// History for a converse request: the most recent turns, with the intake-
-	// questionnaire turn pinned in front if slicing would have dropped it — the
-	// computer must never forget the player's answers (or that they skipped).
-	function withProfile(recent: ConversationTurn[]): ConversationTurn[] {
-		return profileTurn && !recent.includes(profileTurn) ? [profileTurn, ...recent] : recent;
 	}
 
 	initFrom(placeholderBuild);
@@ -522,7 +366,7 @@
 					behaviourId: behaviour.id,
 					opening: true,
 					revisit,
-					history: withProfile(convo.slice(-MAX_HISTORY_TURNS)),
+					history: convo.slice(-MAX_HISTORY_TURNS),
 					sceneContext: sceneContextFor(scene, game)
 				})
 			});
@@ -563,7 +407,7 @@
 		atEnding = false;
 		startBoot(); // the booting animation replays on every fresh run
 		initFrom(build); // picks a fresh random start, resets transcript + state
-		beginIntro(); // the next player answers the questionnaire again
+		await afterEnter();
 	}
 
 	async function sendMessage() {
@@ -596,7 +440,7 @@
 				body: JSON.stringify({
 					behaviourId: behaviour.id,
 					playerMessage: text,
-					history: withProfile(prior.slice(-MAX_HISTORY_TURNS)),
+					history: prior.slice(-MAX_HISTORY_TURNS),
 					sceneContext: sceneContextFor(scene, game)
 				})
 			});
@@ -714,10 +558,6 @@
 	const target = { x: 0, y: 0 };
 
 	function onKeydown(e: KeyboardEvent) {
-		if (introActive) {
-			onIntroKey(e);
-			return;
-		}
 		const el = e.target as HTMLElement | null;
 		if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA')) return;
 		switch (e.key) {
@@ -754,7 +594,7 @@
 	// snap focus back if anything ever steals it.
 	let inputEl = $state<HTMLInputElement>();
 	$effect(() => {
-		if (!pending && !loading && !introActive) inputEl?.focus();
+		if (!pending && !loading) inputEl?.focus();
 	});
 	function refocus() {
 		setTimeout(() => inputEl?.focus(), 0);
@@ -807,7 +647,7 @@
 				initFrom(loaded);
 				loading = false; // reveal the resolved build
 				startBoot(); // palette + geometry are real now — run the boot gif
-				beginIntro(); // questionnaire first; the greeting follows it
+				afterEnter();
 				watchLive(source === 'firestore' ? `build-${loaded.meta.version}` : null);
 			})
 			.catch(() => {
@@ -1029,46 +869,6 @@
 						/>
 					</form>
 				</section>
-
-				{#if introActive}
-					{@const q = INTRO_QUESTIONS[introStep]}
-					<!-- Intake questionnaire: the SAME chatbox, just larger — a .terminal
-					     spanning the window from bottom to top (geometry overridden, every
-					     other style shared); questions type out, history scrolls up. -->
-					<section class="terminal intro">
-						<div class="transcript" bind:this={introScrollEl}>
-							{#each introLines as line (line.id)}
-								<p class={line.who} class:latest={line.id === introQuestionLineId}>
-									{#if line.who === 'player'}<span class="who">&gt;</span>{/if}{line.text.slice(
-										0,
-										line.revealed
-									)}
-								</p>
-							{/each}
-						</div>
-						<form class="composer" onsubmit={(e) => e.preventDefault()}>
-							<span class="prompt">&gt;</span>
-							<input
-								bind:this={introInputEl}
-								bind:value={introAnswer}
-								use:autofocus
-								onblur={() => setTimeout(() => introInputEl?.focus(), 0)}
-								autocomplete="off"
-								spellcheck="false"
-								placeholder={q.kind === 'text' ? 'type your answer…' : 'press a key, 1 to 9…'}
-							/>
-						</form>
-					</section>
-				{/if}
-				{#if introFading}
-					<!-- The bridge between the form and the game: fades in to the
-					     background colour, then fades away over the live screen. -->
-					<div
-						class="introfade"
-						style:background={display.mode === 'full' ? display.bg : '#000000'}
-						transition:fade={{ duration: INTRO_FADE_MS }}
-					></div>
-				{/if}
 			</div>
 			<div class="crt" aria-hidden="true" style:background={crtBg}></div>
 		</div>
@@ -1176,28 +976,6 @@
 	}
 	.content.duo .bld {
 		color: var(--ink-dim);
-	}
-
-	/* Intake questionnaire: the same chatbox, just larger — a .terminal spanning
-	   the whole window (inset matches the .content padding). Only the geometry is
-	   overridden; surface, border, fonts, colours and behaviour are .terminal's. */
-	.terminal.intro {
-		position: absolute;
-		inset: 12px;
-		height: auto;
-		z-index: 60;
-	}
-	/* Lines grow from the bottom (terminal-style): the auto margin soaks up the
-	   free space above until the log fills the box, then scrolling takes over. */
-	.terminal.intro .transcript p:first-child {
-		margin-top: auto;
-	}
-	/* The fade between the finished form and the live game (bg colour; in duotone
-	   pure black maps onto it). */
-	.introfade {
-		position: absolute;
-		inset: 0;
-		z-index: 70;
 	}
 
 	/* Fullscreen boot splash: pure black while the build loads (no palette yet),

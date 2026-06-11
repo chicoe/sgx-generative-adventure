@@ -159,7 +159,12 @@ export function buildPrompt(
 					'',
 					'BEGIN: the player has just RETURNED to this location — they have been here before and you have already met. Give ONE short in-character line acknowledging their return (no re-introductions, do not repeat the room description), then await their reply. Do not take any exit or action yet.'
 				].join('\n')
-			: 'BEGIN: open the interaction. Greet the player and set the scene in character (1–2 sentences), then await their reply. Do not take any exit or action yet.'
+			: [
+					// A fresh greeting can still have prior ground truth (e.g. the intake
+					// questionnaire) — show it so the computer can use it from line one.
+					...(history.length ? ['CONVERSATION SO FAR:', transcript, ''] : []),
+					'BEGIN: open the interaction. Greet the player and set the scene in character (1–2 sentences), then await their reply. Do not take any exit or action yet.'
+				].join('\n')
 		: ['CONVERSATION SO FAR:', transcript, '', `PLAYER: ${playerMessage}`].join('\n');
 
 	return { systemInstruction: parts.join('\n'), userPrompt };
