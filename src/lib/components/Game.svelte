@@ -63,19 +63,79 @@
 	// game. Sequence: the gif plays once (static/boot.gif, authored play-once so
 	// it freezes on its last frame) → holds that frame → a beat on the bare
 	// window → fades into the live screen.
-	const BOOT_GIF_MS = 4500; // static/boot.gif measured at 4.5s (51 frames)
-	const BOOT_HOLD_MS = 1000; // last frame stays up
-	const BOOT_BLACK_MS = 1000; // pure black between the gif and the game
-	let bootPhase = $state<'gif' | 'black' | 'done'>('gif');
-	let bootGifOk = $state(true);
-	let bootTimers: ReturnType<typeof setTimeout>[] = [];
-	function startBoot() {
-		bootTimers.forEach(clearTimeout);
-		bootPhase = 'gif';
-		bootTimers = [
-			setTimeout(() => (bootPhase = 'black'), BOOT_GIF_MS + BOOT_HOLD_MS),
-			setTimeout(() => (bootPhase = 'done'), BOOT_GIF_MS + BOOT_HOLD_MS + BOOT_BLACK_MS)
+	// Three gifs punctuate the kiosk cycle:
+	//   BOOT (page load / new cycle) → interview → INTRO → game → OUTRO (ending).
+	// boot/intro play once (each authored play-once, freezing on its last frame),
+	// hold that frame, take a beat on the bare window, then reveal what's next.
+	// The OUTRO plays once and STAYS frozen on its last frame — that's the
+	// "press any key" still; any key then starts the next cycle at BOOT.
+	type SplashKind = 'boot' | 'intro' | 'outro';
+	// Each slot accepts a VIDEO or a GIF in static/: the player tries
+	// /<kind>.mp4 → /<kind>.webm → /<kind>.gif and shows the first that loads.
+	// Prefer video (H.264 MP4): far smaller files and a real 'ended' event, so
+	// no play time needs configuring. Author them play-once with no audio.
+	const SPLASH_EXTS = ['mp4', 'webm', 'gif'] as const;
+	// GIFs can't report when they finish — their play time is configured here
+	// (videos ignore this and use the real 'ended' event).
+	const SPLASH_GIF_PLAY_MS: Record<SplashKind, number> = { boot: 4500, intro: 4500, outro: 4500 };
+	const SPLASH_HOLD_MS = 1000; // last frame stays up
+	const SPLASH_BLACK_MS = 1000; // bare window between the media and what follows
+	let splashKind = $state<SplashKind>('boot');
+	let splashPhase = $state<'play' | 'black' | 'done'>('play');
+	let splashTry = $state(0); // index into SPLASH_EXTS for the current kind
+	let splashMediaOk = $state(true);
+	let splashTimers: ReturnType<typeof setTimeout>[] = [];
+	const splashSrc = $derived(`/${splashKind}.${SPLASH_EXTS[splashTry]}`);
+	const splashIsVideo = $derived(!splashSrc.endsWith('.gif'));
+	function startSplash(kind: SplashKind) {
+		splashTimers.forEach(clearTimeout);
+		splashKind = kind;
+		splashTry = 0;
+		splashMediaOk = true;
+		splashPhase = 'play';
+	}
+	// The media finished (video 'ended' / the gif's configured play time): hold
+	// the last frame, take a beat on the bare window, then reveal what's next.
+	// The OUTRO never advances — it stays frozen until a key press.
+	function splashMediaEnded() {
+		if (splashKind === 'outro') return;
+		splashTimers.forEach(clearTimeout);
+		splashTimers = [
+			setTimeout(() => (splashPhase = 'black'), SPLASH_HOLD_MS),
+			setTimeout(() => (splashPhase = 'done'), SPLASH_HOLD_MS + SPLASH_BLACK_MS)
 		];
+	}
+	// A gif reports nothing — arm its configured play time once it has loaded.
+	function armGifEnd() {
+		splashTimers.forEach(clearTimeout);
+		splashTimers = [setTimeout(splashMediaEnded, SPLASH_GIF_PLAY_MS[splashKind])];
+	}
+	// Current source failed to load: try the next extension; with nothing left,
+	// skip the media (boot/intro pass straight through; the outro holds the bare
+	// window as the press-any-key still).
+	function nextSplashSource() {
+		if (splashTry + 1 < SPLASH_EXTS.length) {
+			splashTry += 1;
+		} else {
+			splashMediaOk = false;
+			splashMediaEnded();
+		}
+	}
+	// Play WITH sound when the browser lets us (the kiosk launches Chromium with
+	// --autoplay-policy=no-user-gesture-required, so it always does; a normal
+	// browser allows it after the first interaction). If unmuted autoplay is
+	// blocked, play silently rather than not at all. Load failures are NOT
+	// handled here — play() also rejects on them, and advancing the source chain
+	// from both places double-stepped it (skipping the gif fallback); the
+	// element's onerror is the single owner of nextSplashSource.
+	function autoplayWithSound(el: HTMLVideoElement) {
+		el.muted = false;
+		el.play().catch(() => {
+			el.muted = true;
+			el.play().catch(() => {
+				/* onerror handles broken sources */
+			});
+		});
 	}
 
 	// --- intake questionnaire (the intro page) ---------------------------------
@@ -142,7 +202,7 @@
 	// Start the dialogue only once the boot splash is gone, so the player
 	// actually sees the first question type out (not already finished).
 	$effect(() => {
-		if (introActive && !loading && bootPhase === 'done' && introLines.length === 0) {
+		if (introActive && !loading && splashPhase === 'done' && introLines.length === 0) {
 			pushIntro('computer', 'PLEASE, ANSWER THE FOLLOWING QUESTIONS:');
 			pushIntro('system', '[ ENTER confirms · ESC skips ]');
 			askIntroQuestion();
@@ -171,22 +231,22 @@
 		};
 		profileTurn = turn;
 		convo = [...convo, turn];
-		// Fade to the background colour over the form, then run the boot gif; the
-		// game (and its opening greeting) follows once the boot finishes.
+		// Fade to the background colour over the form, then run the INTRO gif; the
+		// game (and its opening greeting) follows once it finishes.
 		introFading = true;
 		setTimeout(() => {
-			startBoot(); // the splash (gif → black beat) covers the swap to the game
+			startSplash('intro'); // the splash (gif → beat) covers the swap to the game
 			introActive = false;
 			introFading = false;
 			pendingOpening = true;
 		}, INTRO_FADE_MS + 150);
 	}
 
-	// Fires the opening greeting only once the post-interview boot has finished,
-	// so its line types out on screen (not hidden behind the splash).
+	// Fires the opening greeting only once the post-interview intro gif has
+	// finished, so its line types out on screen (not hidden behind the splash).
 	let pendingOpening = false;
 	$effect(() => {
-		if (pendingOpening && bootPhase === 'done' && !loading) {
+		if (pendingOpening && splashPhase === 'done' && !loading) {
 			pendingOpening = false;
 			vitalsStartedAt = Date.now(); // the countdown starts with the game itself
 			void afterEnter();
@@ -314,8 +374,6 @@
 	);
 
 	let atEnding = $state(false);
-	let endingTimer: ReturnType<typeof setTimeout> | undefined;
-	const ENDING_RESTART_MS = 180_000; // 3 minutes at an ending → auto restart
 
 	// The computer the terminal is talking to (the current scene's), plus that
 	// conversation's history for the LLM.
@@ -549,20 +607,14 @@
 		}
 	}
 
-	function clearEndingTimer() {
-		if (endingTimer) clearTimeout(endingTimer);
-		endingTimer = undefined;
-	}
-
-	// After entering a scene: an ending freezes into "THE END" and arms the auto-
-	// restart timer; otherwise the computer greets.
+	// After entering a scene: an ending plays the OUTRO gif (which freezes on its
+	// last frame until any key starts the next cycle); otherwise the computer
+	// greets.
 	async function afterEnter() {
-		clearEndingTimer();
 		const s = findScene(build.scenes, game.currentSceneId);
 		if (s?.ending) {
 			atEnding = true;
-			push('system', '[ THE END — type anything (or wait) to begin again ]');
-			endingTimer = setTimeout(() => restart(), ENDING_RESTART_MS);
+			startSplash('outro');
 		} else {
 			atEnding = false;
 			await requestOpening();
@@ -570,21 +622,15 @@
 	}
 
 	async function restart() {
-		clearEndingTimer();
 		atEnding = false;
 		initFrom(build); // picks a fresh random start, resets transcript + state
-		beginIntro(); // the next player answers the questionnaire again (gif after)
+		startSplash('boot'); // a new cycle always opens with the BOOT gif
+		beginIntro(); // …then the next player answers the questionnaire again
 	}
 
 	async function sendMessage() {
 		const text = inputText.trim();
 		if (!text || pending) return;
-		// At an ending, any input begins a new run.
-		if (atEnding) {
-			inputText = '';
-			await restart();
-			return;
-		}
 		push('player', text);
 		inputText = '';
 
@@ -724,6 +770,12 @@
 	const target = { x: 0, y: 0 };
 
 	function onKeydown(e: KeyboardEvent) {
+		// At the outro's frozen last frame, ANY key starts the next cycle.
+		if (atEnding) {
+			e.preventDefault();
+			void restart();
+			return;
+		}
 		if (introActive) {
 			onIntroKey(e);
 			return;
@@ -787,8 +839,8 @@
 		computeScale();
 		const clockId = setInterval(() => (clockNow = Date.now()), 1000);
 		// Nothing visual starts here: the splash stays pure black until the build
-		// (palette + geometry) is in, then the interview shows; the boot gif runs
-		// after the interview (startBoot in finishIntro).
+		// (palette + geometry) is in, then the BOOT gif opens the cycle and the
+		// interview follows it (startSplash + beginIntro in loadBuild's then).
 		let unsubLive: (() => void) | undefined;
 		// Live-update: when the editor publishes a different version, reload the
 		// whole page so the kiosk picks up new content (and any new app code) —
@@ -820,8 +872,8 @@
 				build = loaded;
 				initFrom(loaded);
 				loading = false; // reveal the resolved build
-				bootPhase = 'done'; // no gif yet — the splash drops straight into the
-				beginIntro(); // interview; the gif plays AFTER it (finishIntro)
+				startSplash('boot'); // the cycle opens with the BOOT gif…
+				beginIntro(); // …then the interview (the INTRO gif follows it)
 				watchLive(source === 'firestore' ? `build-${loaded.meta.version}` : null);
 			})
 			.catch(() => {
@@ -845,8 +897,7 @@
 		return () => {
 			cancelAnimationFrame(raf);
 			clearInterval(clockId);
-			bootTimers.forEach(clearTimeout);
-			clearEndingTimer();
+			splashTimers.forEach(clearTimeout);
 			unsubLive?.();
 		};
 	});
@@ -1036,7 +1087,7 @@
 						<input
 							use:autofocus
 							bind:this={inputEl}
-							placeholder={atEnding ? 'type anything to play again…' : 'type to the computer…'}
+							placeholder="type to the computer…"
 							bind:value={inputText}
 							onkeydown={onComposerKey}
 							onblur={refocus}
@@ -1096,29 +1147,47 @@
 			<div class="crt" aria-hidden="true" style:background={crtBg}></div>
 		</div>
 
-		{#if bootPhase !== 'done' || loading}
+		{#if splashPhase !== 'done' || loading}
 			<!-- Hardcoded black (never the palette): covers the whole viewport from the
 			     very first SSR paint, so no colour can flash before the build loads.
-			     The gif fills the same area the game screen occupies (cropped to it,
-			     palette-tinted, under the CRT overlay), fades to the bg-coloured
-			     window (CRT still on), then the splash fades into the live screen;
-			     everything outside the window is the backdrop colour. -->
+			     The current gif (boot / intro / outro) fills the same area the game
+			     screen occupies (cropped to it, palette-tinted, under the CRT overlay),
+			     fades to the bg-coloured window (CRT still on), then the splash fades
+			     into what's next; the outro instead freezes on its last frame until a
+			     key. Everything outside the window is the backdrop colour. -->
 			<div
 				class="bootsplash"
 				style:background={loading ? '#000' : backdrop}
 				out:fade={{ duration: 400 }}
 			>
 				{#if !loading}
-					<!-- The window area keeps its bg colour + CRT for the WHOLE boot —
+					<!-- The window area keeps its bg colour + CRT for the WHOLE splash —
 					     the gif fades out over it into the post-gif beat. -->
 					<div class="bootframe" style="{framePlacement};background:{pageBg}">
-						{#if bootGifOk && bootPhase === 'gif'}
-							<img
-								src="/boot.gif"
-								alt="booting"
-								onerror={() => (bootGifOk = false)}
-								out:fade={{ duration: 500 }}
-							/>
+						{#if splashMediaOk && splashPhase === 'play'}
+							{#if splashIsVideo}
+								{#key splashSrc}
+									<video
+										src={splashSrc}
+										playsinline
+										use:autoplayWithSound
+										onended={splashMediaEnded}
+										onerror={nextSplashSource}
+										out:fade={{ duration: 500 }}
+									>
+										<!-- decorative ambience — no dialogue to caption -->
+										<track kind="captions" />
+									</video>
+								{/key}
+							{:else}
+								<img
+									src={splashSrc}
+									alt={splashKind}
+									onload={armGifEnd}
+									onerror={nextSplashSource}
+									out:fade={{ duration: 500 }}
+								/>
+							{/if}
 						{/if}
 						<div class="crt" style:background={crtBg}></div>
 					</div>
@@ -1244,13 +1313,14 @@
 		position: absolute;
 		overflow: hidden;
 	}
-	.bootframe img {
+	.bootframe img,
+	.bootframe video {
 		width: 100%;
 		height: 100%;
 		object-fit: cover;
-		/* Palette-match the gif: grayscale first, then the same duotone colour map
-		   as the screen (smooth ramp in full/gradient mode, hard two-colour in pure
-		   duotone — duoFunc decides). Black maps to the palette bg, white to ui. */
+		/* Palette-match the media: grayscale first, then the same duotone colour
+		   map as the screen (smooth ramp in full/gradient mode, hard two-colour in
+		   pure duotone — duoFunc decides). Black maps to the palette bg, white to ui. */
 		filter: grayscale(1) url(#sgx-duotone);
 	}
 
