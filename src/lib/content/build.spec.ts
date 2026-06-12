@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { assembleBuild, serializeBuild, deserializeBuild, type DraftContent } from './build';
+import {
+	assembleBuild,
+	scrubDraft,
+	serializeBuild,
+	deserializeBuild,
+	type DraftContent
+} from './build';
 import type { Scene } from '../engine/types';
 
 const scene = (over: Partial<Scene> = {}): Scene => ({
@@ -123,6 +129,81 @@ describe('assembleBuild', () => {
 			'now'
 		);
 		expect(r.errors.join(' ')).toContain('ghost');
+	});
+});
+
+describe('scrubDraft', () => {
+	it('leaves a clean draft untouched and reports nothing', () => {
+		const { draft, removed } = scrubDraft(validDraft);
+		expect(removed).toEqual([]);
+		expect(draft.scenes).toHaveLength(2);
+	});
+
+	it('removes effects, giveables and door keys that reference missing items', () => {
+		const dirty: DraftContent = {
+			...validDraft,
+			scenes: [
+				scene({
+					onEnter: [
+						{ type: 'addItem', itemId: 'ghost' },
+						{ type: 'setFlag', key: 'ok', value: true }
+					],
+					giveableItems: [
+						{ itemId: 'ghost', chance: 1 },
+						{ itemId: 'key', chance: 1 }
+					],
+					exits: [{ id: 'e', toSceneId: 'b', label: 'door', requiredItems: ['ghost', 'key'] }]
+				}),
+				scene({ id: 'b' })
+			]
+		};
+		const { draft, removed } = scrubDraft(dirty);
+		expect(draft.scenes[0].onEnter).toEqual([{ type: 'setFlag', key: 'ok', value: true }]);
+		expect(draft.scenes[0].giveableItems).toEqual([{ itemId: 'key', chance: 1 }]);
+		expect(draft.scenes[0].exits[0].requiredItems).toEqual(['key']);
+		expect(removed).toHaveLength(3);
+		// …and the scrubbed draft now validates.
+		expect(assembleBuild(draft, 1, 'now').errors).toEqual([]);
+	});
+
+	it('removes exits to missing scenes and broken behaviour effects', () => {
+		const dirty: DraftContent = {
+			...validDraft,
+			scenes: [
+				scene({ exits: [{ id: 'e', toSceneId: 'ghost', label: 'go' }] }),
+				scene({ id: 'b' })
+			],
+			behaviours: [
+				{
+					id: 'comp',
+					name: 'C',
+					systemPrompt: 'p',
+					goal: 'g',
+					guardrails: [],
+					allowedOutcomes: [
+						{ id: 'o', label: 'O', granted: true, effects: [{ type: 'addItem', itemId: 'ghost' }] }
+					],
+					onGrantedEffects: [{ type: 'goToScene', sceneId: 'ghost' }]
+				}
+			]
+		};
+		const { draft, removed } = scrubDraft(dirty);
+		expect(draft.scenes[0].exits).toEqual([]);
+		expect(draft.behaviours[0].allowedOutcomes[0].effects).toEqual([]);
+		expect(draft.behaviours[0].onGrantedEffects).toEqual([]);
+		expect(removed).toHaveLength(3);
+		expect(assembleBuild(draft, 1, 'now').errors).toEqual([]);
+	});
+
+	it('repoints a missing startSceneId at a start-flagged scene', () => {
+		const dirty: DraftContent = {
+			...validDraft,
+			meta: { startSceneId: 'ghost' },
+			scenes: [scene(), scene({ id: 'b', start: true })]
+		};
+		const { draft, removed } = scrubDraft(dirty);
+		expect(draft.meta.startSceneId).toBe('b');
+		expect(removed).toHaveLength(1);
 	});
 });
 

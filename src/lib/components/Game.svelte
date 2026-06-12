@@ -10,6 +10,7 @@
 	import { doc, onSnapshot } from 'firebase/firestore';
 	import { db } from '$lib/firebase/client';
 	import { MAP_OUTCOME_ID } from '$lib/llm/adjudicate';
+	import { playSfx } from '$lib/sfx';
 	import { DEFAULT_DISPLAY, themeStyle, duotoneTable, crtBackground } from '$lib/theme';
 	import type { Build, ConversationTurn, Effect, GameState, Item, Scene } from '$lib/engine/types';
 
@@ -153,7 +154,6 @@
 		{ prompt: 'SOCIAL PREFERENCE', kind: 'scale', low: 'SOLITUDE', high: 'DENSE POPULATION' },
 		{ prompt: 'GRAVITY ADAPTABILITY', kind: 'scale', low: 'LOW', high: 'HIGH' },
 		{ prompt: 'ACCEPTABLE LEVEL OF PERSONAL RISK', kind: 'scale', low: 'LOW', high: 'HIGH' },
-		{ prompt: 'DESCRIBE YOUR IDEAL ENVIRONMENT', kind: 'text' },
 		{ prompt: 'WHAT DO YOU FEAR MOST?', kind: 'text' }
 	];
 	let introActive = $state(false);
@@ -197,6 +197,7 @@
 		pushIntro('system', `${introStep + 1} OF ${INTRO_QUESTIONS.length}`);
 		introQuestionLineId = pushIntro('computer', q.prompt);
 		if (q.kind === 'scale') pushIntro('computer', `${q.low} [ 1 2 3 4 5 6 7 8 9 ] ${q.high}`);
+		playSfx('receive'); // each question arrives like a computer reply
 	}
 
 	// Start the dialogue only once the boot splash is gone, so the player
@@ -255,6 +256,7 @@
 
 	function introRecord(a: string) {
 		pushIntro('player', a);
+		playSfx('send'); // answering is "sending" — same cue as the chatbox
 		introAnswers.push({ q: INTRO_QUESTIONS[introStep], a });
 		introAnswer = '';
 		if (introStep + 1 >= INTRO_QUESTIONS.length) finishIntro(false);
@@ -598,6 +600,7 @@
 			const data = await resp.json();
 			if (resp.ok && data.reply) {
 				push('computer', data.reply);
+				playSfx('receive');
 				convo = [...convo, { role: 'computer', text: data.reply, behaviourId: behaviour.id }];
 			}
 		} catch {
@@ -632,6 +635,7 @@
 		const text = inputText.trim();
 		if (!text || pending) return;
 		push('player', text);
+		playSfx('send');
 		inputText = '';
 
 		const behaviour = activeBehaviourId
@@ -661,10 +665,14 @@
 				await resp.json();
 
 			push('computer', data.reply);
+			playSfx('receive');
 			convo = [...convo, { role: 'computer', text: data.reply, behaviourId: behaviour.id }];
 
 			// The computer can put the deck plan on screen (no engine effect involved).
-			if (data.outcomeId === MAP_OUTCOME_ID) mapOpen = true;
+			if (data.outcomeId === MAP_OUTCOME_ID) {
+				mapOpen = true;
+				playSfx('map');
+			}
 
 			if (data.appliedEffects.length) {
 				const prev = game.currentSceneId;
@@ -691,6 +699,7 @@
 					for (const d of availableDoors(build.scenes, prevScene, game)) {
 						if (!d.locked && lockedBefore.has(d.toSceneId)) {
 							push('system', `-- route unlocked: ${d.label} --`);
+							playSfx('unlock');
 							stateNotes.push(`the route "${d.label}" is now UNLOCKED and is an available exit`);
 						} else if (d.canUnlock && !canUnlockBefore.has(d.toSceneId)) {
 							// e.g. a just-granted item qualifies for a sealed door
@@ -712,6 +721,7 @@
 				}
 				if (game.currentSceneId !== prev) {
 					cameFromId = prev;
+					playSfx('door'); // airlock clunk + hiss on every room transition
 					// Movement event in the LLM history, so the computer carries the
 					// narrative across rooms ("we came here from the cryo pod…").
 					const from = findScene(build.scenes, prev)?.name || prev;
@@ -741,8 +751,10 @@
 		// The "map" item is a player tool, not a conversation: it opens the deck plan.
 		if (item.id === 'map') {
 			mapOpen = !mapOpen;
+			playSfx('map');
 			return;
 		}
+		playSfx('use');
 		inputText = `use the ${item.name}`;
 		sendMessage();
 	}
@@ -754,6 +766,7 @@
 		if (e.key === '0') {
 			e.preventDefault();
 			mapOpen = !mapOpen;
+			playSfx('map');
 			return;
 		}
 		if (e.key >= '1' && e.key <= '9') {

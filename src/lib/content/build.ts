@@ -120,6 +120,108 @@ function validateReferences(draft: DraftContent): string[] {
 	return errors;
 }
 
+export interface ScrubResult {
+	draft: DraftContent;
+	removed: string[]; // a human-readable line per removed reference
+}
+
+/**
+ * The cleanup counterpart of validateReferences: drop every reference to a
+ * scene/item/behaviour that no longer exists (deleted or renamed), returning a
+ * new draft plus a report of what was removed. Pure — callers persist it.
+ */
+export function scrubDraft(draft: DraftContent): ScrubResult {
+	const sceneIds = new Set(draft.scenes.map((s) => s.id));
+	const itemIds = new Set(draft.items.map((i) => i.id));
+	const behaviourIds = new Set(draft.behaviours.map((b) => b.id));
+	const removed: string[] = [];
+
+	const keepEffects = (effects: Effect[] | undefined, where: string): Effect[] | undefined =>
+		effects?.filter((e) => {
+			if ((e.type === 'addItem' || e.type === 'removeItem') && !itemIds.has(e.itemId)) {
+				removed.push(`${where}: removed effect referencing missing item "${e.itemId}"`);
+				return false;
+			}
+			if (e.type === 'goToScene' && !sceneIds.has(e.sceneId)) {
+				removed.push(`${where}: removed effect targeting missing scene "${e.sceneId}"`);
+				return false;
+			}
+			return true;
+		});
+
+	const scenes = draft.scenes.map((s) => {
+		const exits = s.exits
+			.filter((x) => {
+				if (!sceneIds.has(x.toSceneId)) {
+					removed.push(
+						`scene "${s.id}": removed exit "${x.label}" to missing scene "${x.toSceneId}"`
+					);
+					return false;
+				}
+				return true;
+			})
+			.map((x) => {
+				const req = x.requiredItems?.filter((id) => {
+					if (!itemIds.has(id)) {
+						removed.push(`scene "${s.id}" exit "${x.label}": dropped missing key item "${id}"`);
+						return false;
+					}
+					return true;
+				});
+				return { ...x, requiredItems: req?.length ? req : undefined };
+			});
+		// Hotspots are legacy (unused by the editor/runtime) — drop broken ones whole.
+		const hotspots = s.hotspots
+			.filter((h) => {
+				const broken =
+					(h.goToSceneId && !sceneIds.has(h.goToSceneId)) ||
+					(h.behaviourId && !behaviourIds.has(h.behaviourId)) ||
+					conditionItemIds(h.condition).some((id) => !itemIds.has(id));
+				if (broken)
+					removed.push(`scene "${s.id}": removed hotspot "${h.id}" with missing references`);
+				return !broken;
+			})
+			.map((h) => ({ ...h, effects: keepEffects(h.effects, `scene "${s.id}" hotspot "${h.id}"`) }));
+		const giveableItems = s.giveableItems?.filter((g) => {
+			if (!itemIds.has(g.itemId)) {
+				removed.push(`scene "${s.id}": removed giveable for missing item "${g.itemId}"`);
+				return false;
+			}
+			return true;
+		});
+		return {
+			...s,
+			exits,
+			hotspots,
+			onEnter: keepEffects(s.onEnter, `scene "${s.id}" onEnter`),
+			giveableItems: giveableItems?.length ? giveableItems : undefined
+		};
+	});
+
+	const behaviours = draft.behaviours.map((b) => ({
+		...b,
+		onGrantedEffects: keepEffects(b.onGrantedEffects, `behaviour "${b.id}" onGranted`) ?? [],
+		onDeniedEffects: keepEffects(b.onDeniedEffects, `behaviour "${b.id}" onDenied`),
+		allowedOutcomes: b.allowedOutcomes.map((o) => ({
+			...o,
+			effects: keepEffects(o.effects, `behaviour "${b.id}" outcome "${o.id}"`) ?? []
+		}))
+	}));
+
+	const meta = { ...draft.meta };
+	if (meta.startSceneId && !sceneIds.has(meta.startSceneId)) {
+		const fallback = scenes.find((s) => s.start)?.id ?? scenes[0]?.id ?? '';
+		removed.push(`startSceneId "${meta.startSceneId}" is a missing scene — now "${fallback}"`);
+		meta.startSceneId = fallback;
+	}
+	if (meta.defaultBehaviourId && !behaviourIds.has(meta.defaultBehaviourId)) {
+		removed.push(`cleared defaultBehaviourId "${meta.defaultBehaviourId}" (missing behaviour)`);
+		meta.defaultBehaviourId = undefined;
+	}
+
+	return { draft: { meta, scenes, items: draft.items, behaviours }, removed };
+}
+
 /**
  * Validate all draft content and assemble an immutable Build snapshot, or return
  * a list of human-readable errors. Blocks publish on any invalid content.

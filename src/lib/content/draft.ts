@@ -14,7 +14,7 @@ import {
 } from 'firebase/firestore';
 import { db } from '../firebase/client';
 import type { Build, DisplaySettings, Item, LLMBehaviour, Scene } from '../engine/types';
-import type { DraftContent } from './build';
+import { scrubDraft, type DraftContent } from './build';
 
 const rootDoc = () => doc(db(), 'draft', 'content');
 
@@ -93,6 +93,57 @@ export async function deleteSceneAndLinks(id: string): Promise<void> {
 export const saveItem = (it: Item) =>
 	setDoc(doc(db(), 'draft', 'content', 'items', it.id), clean(it));
 export const deleteItem = (id: string) => deleteDoc(doc(db(), 'draft', 'content', 'items', id));
+
+/** Persist a scrubbed draft's scenes/behaviours/meta onto an open batch. */
+function batchScrubbed(batch: ReturnType<typeof writeBatch>, cleaned: DraftContent) {
+	batch.set(
+		rootDoc(),
+		{
+			startSceneId: cleaned.meta.startSceneId,
+			defaultBehaviourId: cleaned.meta.defaultBehaviourId ?? deleteField()
+		},
+		{ merge: true }
+	);
+	for (const s of cleaned.scenes)
+		batch.set(doc(db(), 'draft', 'content', 'scenes', s.id), clean(s));
+	for (const b of cleaned.behaviours)
+		batch.set(doc(db(), 'draft', 'content', 'behaviours', b.id), clean(b));
+}
+
+/**
+ * Delete an item AND scrub every reference to it (scene onEnter effects,
+ * giveables, door-lock key lists, behaviour effects) in one batch — the item
+ * counterpart of deleteSceneAndLinks, so deletes can't dangle.
+ */
+export async function deleteItemAndRefs(id: string): Promise<void> {
+	const draft = await loadDraft();
+	const batch = writeBatch(db());
+	batch.delete(doc(db(), 'draft', 'content', 'items', id));
+	if (draft) {
+		const { draft: cleaned } = scrubDraft({
+			...draft,
+			items: draft.items.filter((i) => i.id !== id)
+		});
+		batchScrubbed(batch, cleaned);
+	}
+	await batch.commit();
+}
+
+/**
+ * One-shot cleanup for drafts that already dangle (older deletes): drop every
+ * reference to missing scenes/items/behaviours across the whole draft.
+ * Returns the report of what was removed — empty means it was already clean.
+ */
+export async function cleanupDraft(): Promise<string[]> {
+	const draft = await loadDraft();
+	if (!draft) return [];
+	const { draft: cleaned, removed } = scrubDraft(draft);
+	if (!removed.length) return [];
+	const batch = writeBatch(db());
+	batchScrubbed(batch, cleaned);
+	await batch.commit();
+	return removed;
+}
 export const saveBehaviour = (b: LLMBehaviour) =>
 	setDoc(doc(db(), 'draft', 'content', 'behaviours', b.id), clean(b));
 export const deleteBehaviour = (id: string) =>

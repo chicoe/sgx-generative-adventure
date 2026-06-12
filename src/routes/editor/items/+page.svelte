@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { loadDraft, saveItem, deleteItem } from '$lib/content/draft';
+	import { loadDraft, saveItem, deleteItemAndRefs } from '$lib/content/draft';
 	import { draftStatus } from '$lib/content/draftStatus.svelte';
 	import { uploadItemIcon } from '$lib/firebase/storage';
 	import type { Item } from '$lib/engine/types';
@@ -51,10 +51,12 @@
 	async function remove(id: string) {
 		busy = true;
 		try {
-			await deleteItem(id);
+			// Also scrubs every reference to the item (effects, giveables, door keys)
+			// so the deletion can't leave the draft failing validation.
+			await deleteItemAndRefs(id);
 			draftStatus.markDirty();
 			await refresh();
-			message = `Deleted "${id}".`;
+			message = `Deleted "${id}" and removed all references to it.`;
 		} catch (e) {
 			message = e instanceof Error ? e.message : String(e);
 		} finally {

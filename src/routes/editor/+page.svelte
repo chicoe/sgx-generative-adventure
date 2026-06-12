@@ -5,7 +5,8 @@
 		loadDraft,
 		seedDraftFromBuild,
 		restoreDraftFromBuild,
-		setDefaultBehaviour
+		setDefaultBehaviour,
+		cleanupDraft
 	} from '$lib/content/draft';
 	import {
 		saveDraftBuild,
@@ -87,6 +88,26 @@
 	const publishVersion = (id: string) =>
 		run(() => setActiveBuild(id), `${id} is now live — the game runs this version.`);
 
+	// One-shot repair for drafts with dangling references (e.g. items deleted
+	// before deletes learned to scrub): removes them and reports each removal.
+	async function cleanup() {
+		busy = true;
+		message = '';
+		errors = [];
+		try {
+			const removed = await cleanupDraft();
+			message = removed.length
+				? `Cleaned up ${removed.length} dangling reference${removed.length === 1 ? '' : 's'}:\n— ${removed.join('\n— ')}`
+				: 'Nothing to clean — the draft has no dangling references.';
+			draftStatus.markDirty();
+			await refresh();
+		} catch (e) {
+			errors = [e instanceof Error ? e.message : String(e)];
+		} finally {
+			busy = false;
+		}
+	}
+
 	// Inline editing of a version's commit message.
 	let editingId = $state<string | null>(null);
 	let editMsg = $state('');
@@ -164,6 +185,12 @@
 			disabled={busy}
 		/>
 		<button type="button" class="primary" onclick={save} disabled={busy}>Validate &amp; save</button
+		>
+		<button
+			type="button"
+			title="Remove references to deleted scenes/items/behaviours from the whole draft"
+			onclick={cleanup}
+			disabled={busy}>Clean up references</button
 		>
 	</div>
 </section>
@@ -251,6 +278,8 @@
 	}
 	.ok {
 		color: #9fc0a8;
+		/* the cleanup report is multi-line (one removal per line) */
+		white-space: pre-line;
 	}
 	.dirty-note {
 		color: #ff5a4a;
