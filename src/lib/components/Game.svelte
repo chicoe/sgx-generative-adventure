@@ -10,7 +10,7 @@
 	import { doc, onSnapshot } from 'firebase/firestore';
 	import { db } from '$lib/firebase/client';
 	import { MAP_OUTCOME_ID } from '$lib/llm/adjudicate';
-	import { playSfx } from '$lib/sfx';
+	import { audioUnlocked, playSfx } from '$lib/sfx';
 	import { DEFAULT_DISPLAY, themeStyle, duotoneTable, crtBackground } from '$lib/theme';
 	import type { Build, ConversationTurn, Effect, GameState, Item, Scene } from '$lib/engine/types';
 
@@ -86,6 +86,10 @@
 	let splashTry = $state(0); // index into SPLASH_EXTS for the current kind
 	let splashMediaOk = $state(true);
 	let splashTimers: ReturnType<typeof setTimeout>[] = [];
+	// Sound guarantee: if the browser won't allow audio yet at load (no kiosk
+	// flag, no prior interaction), hold on a black "press any key to start"
+	// screen — that key press is the gesture that unlocks sound, then boot rolls.
+	let needsKeyToStart = $state(false);
 	const splashSrc = $derived(`/${splashKind}.${SPLASH_EXTS[splashTry]}`);
 	const splashIsVideo = $derived(!splashSrc.endsWith('.gif'));
 	function startSplash(kind: SplashKind) {
@@ -245,7 +249,9 @@
 
 	// Fires the opening greeting only once the post-interview intro gif has
 	// finished, so its line types out on screen (not hidden behind the splash).
-	let pendingOpening = false;
+	// MUST be $state: a plain variable short-circuits the effect's first run
+	// before splashPhase is read, so the effect would never re-run (no deps).
+	let pendingOpening = $state(false);
 	$effect(() => {
 		if (pendingOpening && splashPhase === 'done' && !loading) {
 			pendingOpening = false;
@@ -283,6 +289,12 @@
 		if (q.kind === 'text' && e.key === 'Enter') {
 			e.preventDefault();
 			const a = introAnswer.trim();
+			// The restart cheat works from the interview too (kiosk unstick).
+			if (a.toLowerCase().replace(/\s+/g, ' ') === 'sgx restart') {
+				introAnswer = '';
+				void restart();
+				return;
+			}
 			if (a) introRecord(a);
 		}
 	}
@@ -631,9 +643,145 @@
 		beginIntro(); // …then the next player answers the questionnaire again
 	}
 
+	// --- cheat codes -----------------------------------------------------------
+	// Operator commands typed straight into the composer, intercepted BEFORE the
+	// LLM — the computer never sees them and they leave no trace in its history.
+	//   sgx restart        → restart the whole experience (works even while the
+	//                        computer is busy — the unstick button)
+	//   sgx next room      → force a move through the first open door
+	//   sgx rooms          → list every room ("here" marks the current one)
+	//   sgx go to <room>   → teleport to a room by name (ignores doors & locks)
+	//   sgx items          → list the items present in this room
+	//   sgx get <item>     → grant an item by name
+	// Extend by adding cases below.
+	const matchByName = <T extends { id: string; name?: string }>(list: T[], q: string) =>
+		list.find((x) => x.id.toLowerCase() === q || (x.name ?? '').toLowerCase() === q) ??
+		list.find((x) => (x.name ?? '').toLowerCase().includes(q) || x.id.toLowerCase().includes(q));
+
+	// A forced transition: real engine move + the same bookkeeping as a normal one
+	// (movement STATE UPDATE, door sound, fresh greeting) so the computer keeps up.
+	async function cheatMoveTo(sceneId: string) {
+		const prev = game.currentSceneId;
+		game = applyEffects(game, [{ type: 'goToScene', sceneId }]);
+		cameFromId = prev;
+		playSfx('door');
+		const from = findScene(build.scenes, prev)?.name || prev;
+		const to = findScene(build.scenes, game.currentSceneId)?.name || game.currentSceneId;
+		convo = [
+			...convo,
+			{
+				role: 'system',
+				text: `STATE UPDATE: the player moved from "${from}" to "${to}".`,
+				behaviourId: activeBehaviourId ?? ''
+			}
+		];
+		enterScene(build, game, []);
+		await afterEnter();
+	}
+
+	async function tryCheat(raw: string): Promise<boolean> {
+		const cmd = raw.toLowerCase().replace(/\s+/g, ' ').trim();
+		if (!cmd.startsWith('sgx')) return false;
+
+		if (cmd === 'sgx restart') {
+			await restart();
+			return true;
+		}
+
+		if (cmd === 'sgx rooms') {
+			// Only the rooms connected to this one (🔒 marks a sealed door).
+			const doors = availableDoors(build.scenes, scene, game).map(
+				(d) =>
+					`${findScene(build.scenes, d.toSceneId)?.name || d.toSceneId}${d.locked ? ' 🔒' : ''}`
+			);
+			push(
+				'system',
+				doors.length
+					? `[ rooms connected to ${scene.name || scene.id}: ${doors.join(' · ')} ]`
+					: '[ no rooms connect to this one ]'
+			);
+			return true;
+		}
+
+		if (cmd === 'sgx items') {
+			const here = presentGiveables.map((id) => {
+				const it = build.items.find((i) => i.id === id);
+				return `${it?.name || id}${game.inventory.includes(id) ? ' (held)' : ''}`;
+			});
+			push('system', here.length ? `[ items here: ${here.join(' · ')} ]` : '[ no items here ]');
+			return true;
+		}
+
+		// State-mutating overrides wait their turn behind a pending reply.
+		if (pending) {
+			push('system', '[ computer busy — try the override again in a moment ]');
+			return true;
+		}
+
+		if (cmd === 'sgx next room') {
+			const door = availableDoors(build.scenes, scene, game).find((d) => !d.locked);
+			if (!door) {
+				push('system', '[ override failed — no open route from here ]');
+				return true;
+			}
+			push('system', `[ override accepted — forcing route: ${door.label} ]`);
+			await cheatMoveTo(door.toSceneId);
+			return true;
+		}
+
+		if (cmd.startsWith('sgx go to ')) {
+			const q = cmd.slice('sgx go to '.length).trim();
+			const dest = matchByName(build.scenes, q);
+			if (!dest) {
+				push('system', `[ no room matches "${q}" — try "sgx rooms" ]`);
+			} else if (dest.id === game.currentSceneId) {
+				push('system', '[ already there ]');
+			} else {
+				push('system', `[ override accepted — teleporting to ${dest.name || dest.id} ]`);
+				await cheatMoveTo(dest.id);
+			}
+			return true;
+		}
+
+		if (cmd.startsWith('sgx get ')) {
+			const q = cmd.slice('sgx get '.length).trim();
+			const item = matchByName(build.items, q);
+			if (!item) {
+				push('system', `[ no item matches "${q}" ]`);
+			} else if (game.inventory.includes(item.id)) {
+				push('system', `[ already holding ${item.name} ]`);
+			} else {
+				game = applyEffects(game, [{ type: 'addItem', itemId: item.id }]);
+				playSfx('use');
+				push('system', `[ +item ${item.name} ]`);
+				convo = [
+					...convo,
+					{
+						role: 'system',
+						text: `STATE UPDATE: the player now holds "${item.name}".`,
+						behaviourId: activeBehaviourId ?? ''
+					}
+				];
+			}
+			return true;
+		}
+
+		push(
+			'system',
+			'[ unknown override — known: "sgx restart" · "sgx next room" · "sgx rooms" · "sgx go to <room>" · "sgx items" · "sgx get <item>" ]'
+		);
+		return true;
+	}
+
 	async function sendMessage() {
 		const text = inputText.trim();
-		if (!text || pending) return;
+		if (!text) return;
+		// Cheats run before the pending guard, so "sgx restart" can always unstick.
+		if (await tryCheat(text)) {
+			inputText = '';
+			return;
+		}
+		if (pending) return;
 		push('player', text);
 		playSfx('send');
 		inputText = '';
@@ -783,6 +931,14 @@
 	const target = { x: 0, y: 0 };
 
 	function onKeydown(e: KeyboardEvent) {
+		// Waiting for the audio-unlocking gesture: any key starts the boot.
+		if (needsKeyToStart) {
+			e.preventDefault();
+			needsKeyToStart = false;
+			startSplash('boot');
+			beginIntro();
+			return;
+		}
 		// At the outro's frozen last frame, ANY key starts the next cycle.
 		if (atEnding) {
 			e.preventDefault();
@@ -885,8 +1041,13 @@
 				build = loaded;
 				initFrom(loaded);
 				loading = false; // reveal the resolved build
-				startSplash('boot'); // the cycle opens with the BOOT gif…
-				beginIntro(); // …then the interview (the INTRO gif follows it)
+				if (audioUnlocked()) {
+					startSplash('boot'); // the cycle opens with the BOOT gif…
+					beginIntro(); // …then the interview (the INTRO gif follows it)
+				} else {
+					// No sound allowed yet: wait for a key (see needsKeyToStart above).
+					needsKeyToStart = true;
+				}
 				watchLive(source === 'firestore' ? `build-${loaded.meta.version}` : null);
 			})
 			.catch(() => {
@@ -1170,10 +1331,12 @@
 			     key. Everything outside the window is the backdrop colour. -->
 			<div
 				class="bootsplash"
-				style:background={loading ? '#000' : backdrop}
+				style:background={loading || needsKeyToStart ? '#000' : backdrop}
 				out:fade={{ duration: 400 }}
 			>
-				{#if !loading}
+				{#if needsKeyToStart}
+					<div class="startprompt"><span>press any key to start</span></div>
+				{:else if !loading}
 					<!-- The window area keeps its bg colour + CRT for the WHOLE splash —
 					     the gif fades out over it into the post-gif beat. -->
 					<div class="bootframe" style="{framePlacement};background:{pageBg}">
@@ -1297,6 +1460,22 @@
 	.terminal.intro .transcript p:first-child {
 		margin-top: auto;
 	}
+	/* "Press any key" gate: same discrete look as the fail page — it exists only
+	   to collect the gesture that unlocks audio before the boot rolls. */
+	.startprompt {
+		position: absolute;
+		inset: 0;
+		display: grid;
+		place-items: center;
+	}
+	.startprompt span {
+		font-family: var(--font-terminal);
+		font-size: 1rem;
+		letter-spacing: 0.2em;
+		color: #555;
+		animation: blink 1.1s steps(1) infinite;
+	}
+
 	/* Sits under the interview, over the game: bg-coloured, never transparent —
 	   so the interview's fade-in can only ever reveal the background colour. */
 	.introshield {

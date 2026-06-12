@@ -74,6 +74,16 @@ function noise(c: AudioContext, { at = 0, dur, from = 1500, to = 150, vol = 0.05
 	src.stop(t0 + dur);
 }
 
+/**
+ * True when the browser will allow sound RIGHT NOW — i.e. the autoplay policy
+ * is lifted (kiosk flag) or the user has already interacted. A fresh page in a
+ * normal browser reports false until the first key press / click.
+ */
+export function audioUnlocked(): boolean {
+	const c = context();
+	return !!c && c.state === 'running';
+}
+
 /** Fire a feedback cue. Safe to call anywhere — silently no-ops without audio. */
 export function playSfx(name: SfxName): void {
 	const c = context();
