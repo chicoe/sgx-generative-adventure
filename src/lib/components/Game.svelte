@@ -4,7 +4,13 @@
 	import SceneRenderer from '$lib/components/SceneRenderer.svelte';
 	import { placeholderBuild } from '$lib/game/placeholderBuild';
 	import { startGame } from '$lib/engine/state';
-	import { availableDoors, findScene, rollGiveableItems } from '$lib/engine/graph';
+	import {
+		availableDoors,
+		findScene,
+		layerImagePool,
+		rollGiveableItems,
+		rollLayerImages
+	} from '$lib/engine/graph';
 	import { applyEffects } from '$lib/engine/effects';
 	import { loadActiveBuild } from '$lib/content/loader';
 	import { doc, onSnapshot } from 'firebase/firestore';
@@ -57,6 +63,8 @@
 	let loading = $state(true);
 	let failed = $state(false);
 	let game = $state<GameState>(startGame(placeholderBuild).state);
+	// Per-run layer-art choices ("sceneId/layerId" → image) — rolled in initFrom.
+	let artPicks = $state<Record<string, string>>({});
 
 	// Boot splash: a full-screen overlay (hardcoded BLACK while loading — it also
 	// kills any colour flash before the build's settings arrive). The gif runs
@@ -401,7 +409,7 @@
 
 	// A scene with no usable layer art shows a "no signal" static screen (the
 	// client hasn't supplied art for it yet).
-	const sceneHasArt = (s: Scene) => s.layers.some((l) => l.imagePath?.trim());
+	const sceneHasArt = (s: Scene) => s.layers.some((l) => layerImagePool(l).length > 0);
 
 	// Items the computer may give in the current scene THIS run (rolled on entry).
 	let presentGiveables = $state<string[]>([]);
@@ -568,6 +576,9 @@
 	function initFrom(b: Build) {
 		const started = startGame(b);
 		game = started.state;
+		// One art roll per RUN: multi-image layers keep the same variant for the
+		// whole run, so leaving a room and coming back can't change its look.
+		artPicks = rollLayerImages(b.scenes);
 		lines = [];
 		convo = []; // a fresh run starts the computer's memory clean
 		profileTurn = null;
@@ -1146,7 +1157,7 @@
 							{@const snap = findScene(build.scenes, game.currentSceneId)!}
 							<div class="scene-holder" in:fade={{ duration: 450 }} out:fade={{ duration: 300 }}>
 								{#if sceneHasArt(snap)}
-									<SceneRenderer scene={snap} {look} />
+									<SceneRenderer scene={snap} {look} picks={artPicks} />
 								{:else}
 									<div class="nosignal" aria-label="no signal">
 										<div class="static"></div>

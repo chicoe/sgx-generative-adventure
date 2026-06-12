@@ -6,12 +6,15 @@ import {
 	doorUnlockedFlag,
 	evaluate,
 	findScene,
+	layerImagePool,
+	pickLayerImage,
+	rollLayerImages,
 	rollGiveableItems
 } from './graph';
 import { createGameState } from './state';
 import { applyEffects } from './effects';
 import { testBuild } from './fixtures';
-import type { Condition, GameState, Scene } from './types';
+import type { Condition, GameState, Scene, SceneLayer } from './types';
 
 const stateWith = (mut: (s: GameState) => GameState): GameState => mut(createGameState('bridge'));
 
@@ -171,5 +174,74 @@ describe('rollGiveableItems', () => {
 
 	it('returns empty for a scene with no giveable items', () => {
 		expect(rollGiveableItems(scene(undefined))).toEqual([]);
+	});
+});
+
+describe('layer image pools', () => {
+	const layer = (over: Partial<SceneLayer> = {}): SceneLayer => ({
+		id: 'l',
+		imagePath: '',
+		z: 0,
+		parallaxFactor: 0,
+		...over
+	});
+
+	it('uses the variant pool when present, the single path otherwise', () => {
+		expect(layerImagePool(layer({ imagePath: 'a.png' }))).toEqual(['a.png']);
+		expect(layerImagePool(layer({ imagePath: 'a.png', imagePaths: ['b.png', 'c.png'] }))).toEqual([
+			'b.png',
+			'c.png'
+		]);
+	});
+
+	it('ignores blank entries and reports empty for art-less layers', () => {
+		expect(layerImagePool(layer({ imagePaths: ['  ', ''] }))).toEqual([]);
+		expect(layerImagePool(layer())).toEqual([]);
+		expect(pickLayerImage(layer())).toBeUndefined();
+	});
+
+	it('picks uniformly across the pool via the injected rng', () => {
+		const l = layer({ imagePaths: ['a.png', 'b.png', 'c.png'] });
+		expect(pickLayerImage(l, () => 0)).toBe('a.png');
+		expect(pickLayerImage(l, () => 0.5)).toBe('b.png');
+		expect(pickLayerImage(l, () => 0.999)).toBe('c.png');
+	});
+});
+
+describe('rollLayerImages', () => {
+	it('rolls one variant per layer for the whole run, keyed sceneId/layerId', () => {
+		const scenes: Scene[] = [
+			{
+				id: 's1',
+				name: 'S1',
+				layers: [
+					{ id: 'bg', imagePath: '', imagePaths: ['a.png', 'b.png'], z: 0, parallaxFactor: 0 }
+				],
+				hotspots: [],
+				exits: []
+			},
+			{
+				id: 's2',
+				name: 'S2',
+				layers: [{ id: 'bg', imagePath: 'solo.png', z: 0, parallaxFactor: 0 }],
+				hotspots: [],
+				exits: []
+			}
+		];
+		const picks = rollLayerImages(scenes, () => 0.9);
+		expect(picks).toEqual({ 's1/bg': 'b.png', 's2/bg': 'solo.png' });
+	});
+
+	it('skips art-less layers entirely', () => {
+		const scenes: Scene[] = [
+			{
+				id: 's',
+				name: 'S',
+				layers: [{ id: 'empty', imagePath: '', z: 0, parallaxFactor: 0 }],
+				hotspots: [],
+				exits: []
+			}
+		];
+		expect(rollLayerImages(scenes)).toEqual({});
 	});
 });

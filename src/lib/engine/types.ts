@@ -30,7 +30,10 @@ export type Effect =
 // ---------------------------------------------------------------------------
 export interface SceneLayer {
 	id: string;
-	imagePath: string; // Firebase Storage path
+	imagePath: string; // single image (legacy / fallback when imagePaths is empty)
+	// Optional pool of variants: when non-empty, ONE is picked at random each
+	// time the scene is shown. The editor keeps imagePath = the first variant.
+	imagePaths?: string[];
 	z: number; // stacking order, 0 = back
 	parallaxFactor: number; // 0 = static, 1 = full movement
 }

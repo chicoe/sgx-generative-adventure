@@ -140,12 +140,32 @@
 		]);
 	const removeLayer = (i: number) =>
 		current && (current.layers = current.layers.filter((_, j) => j !== i));
+
+	// A layer can hold SEVERAL images — the game shows one at random per visit.
+	// imagePaths is the pool; imagePath mirrors the first entry (legacy readers).
+	const layerPool = (l: { imagePath: string; imagePaths?: string[] }): string[] =>
+		l.imagePaths?.length ? l.imagePaths : l.imagePath ? [l.imagePath] : [];
+	function setLayerPool(i: number, pool: string[]) {
+		if (!current) return;
+		current.layers[i].imagePaths = pool;
+		current.layers[i].imagePath = pool[0] ?? '';
+	}
+	const addLayerImage = (i: number, path: string) =>
+		current && path.trim() && setLayerPool(i, [...layerPool(current.layers[i]), path.trim()]);
+	const removeLayerImage = (i: number, j: number) =>
+		current &&
+		setLayerPool(
+			i,
+			layerPool(current.layers[i]).filter((_, k) => k !== j)
+		);
+	// Draft text for each layer's "add by path" input.
+	let pathDrafts = $state<Record<number, string>>({});
 	async function upload(i: number, file?: File) {
 		if (!file || !current) return;
 		uploading = true;
 		message = '';
 		try {
-			current.layers[i].imagePath = await uploadImage(file, 'scenes');
+			addLayerImage(i, await uploadImage(file, 'scenes'));
 		} catch (e) {
 			message = e instanceof Error ? e.message : String(e);
 		} finally {
@@ -158,7 +178,7 @@
 		current &&
 		(current.giveableItems = [
 			...(current.giveableItems ?? []),
-			{ itemId: itemIds[0] ?? '', chance: 0.5 }
+			{ itemId: itemIds[0] ?? '', chance: 1 }
 		]);
 	const removeGiveable = (i: number) =>
 		current && (current.giveableItems = (current.giveableItems ?? []).filter((_, j) => j !== i));
@@ -252,10 +272,11 @@
 		{/if}
 
 		<fieldset>
-			<legend>layers (back → front by z)</legend>
+			<legend
+				>backround layers (back → front by z — a layer with several images shows ONE at random per visit)</legend
+			>
 			{#each current.layers as layer, i (i)}
 				<div class="layer">
-					{#if layer.imagePath}<img class="thumb" src={imgUrl(layer.imagePath)} alt="" />{/if}
 					<div class="layer-fields">
 						<div class="rowline">
 							<input class="sm" placeholder="layer id" bind:value={current.layers[i].id} />
@@ -272,8 +293,43 @@
 							</label>
 							<button type="button" class="x" onclick={() => removeLayer(i)}>✕</button>
 						</div>
+						{#if layerPool(layer).length}
+							<div class="variants">
+								{#each layerPool(layer) as p, j (`${p}-${j}`)}
+									<span class="variant">
+										<img class="thumb" src={imgUrl(p)} alt="" title={p} />
+										<button
+											type="button"
+											class="x vx"
+											title="remove this image"
+											onclick={() => removeLayerImage(i, j)}>✕</button
+										>
+									</span>
+								{/each}
+								{#if layerPool(layer).length > 1}
+									<span class="muted small">1 of {layerPool(layer).length}, random per visit</span>
+								{/if}
+							</div>
+						{/if}
 						<div class="rowline">
-							<input placeholder="image path / URL" bind:value={current.layers[i].imagePath} />
+							<input
+								placeholder="add image by path / URL"
+								bind:value={pathDrafts[i]}
+								onkeydown={(e) => {
+									if (e.key === 'Enter') {
+										e.preventDefault();
+										addLayerImage(i, pathDrafts[i] ?? '');
+										pathDrafts[i] = '';
+									}
+								}}
+							/>
+							<button
+								type="button"
+								onclick={() => {
+									addLayerImage(i, pathDrafts[i] ?? '');
+									pathDrafts[i] = '';
+								}}>add</button
+							>
 							<input
 								type="file"
 								accept="image/png,image/jpeg,image/gif"
@@ -450,6 +506,28 @@
 		height: 40px;
 		object-fit: cover;
 		border: 1px solid var(--line);
+	}
+	/* A layer's image pool: thumbnails with a per-image remove. */
+	.variants {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 0.4rem;
+	}
+	.variant {
+		position: relative;
+		display: inline-flex;
+	}
+	.variant .vx {
+		position: absolute;
+		top: -6px;
+		right: -6px;
+		padding: 0 0.25rem;
+		line-height: 1.1;
+		background: #14161a;
+	}
+	.small {
+		font-size: 0.72rem;
 	}
 	.actions {
 		display: flex;

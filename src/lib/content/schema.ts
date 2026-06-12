@@ -37,6 +37,7 @@ export const filterSpecSchema = z.object({
 export const sceneLayerSchema = z.object({
 	id: z.string().min(1),
 	imagePath: z.string(),
+	imagePaths: z.array(z.string()).optional(), // variant pool — one shown at random
 	z: z.number(),
 	parallaxFactor: z.number()
 });

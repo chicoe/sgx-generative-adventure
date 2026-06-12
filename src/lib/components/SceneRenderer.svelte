@@ -3,7 +3,8 @@
 	// with CSS-transform parallax and a CSS filter grade. Pure CSS, no WebGL — a
 	// future PixiJS renderer can replace THIS component without touching engine
 	// logic. Keep it dumb: it takes a Scene + a look vector and draws.
-	import type { Scene } from '$lib/engine/types';
+	import type { Scene, SceneLayer } from '$lib/engine/types';
+	import { layerImagePool, pickLayerImage } from '$lib/engine/graph';
 
 	let {
 		scene,
@@ -11,28 +12,53 @@
 		// How a layer imagePath resolves to a URL. Absolute URLs (Storage download
 		// URLs) and rooted paths pass through; bare paths resolve under /static.
 		resolve = (path: string) =>
-			/^(https?:)?\/\//.test(path) || path.startsWith('/') ? path : `/${path}`
+			/^(https?:)?\/\//.test(path) || path.startsWith('/') ? path : `/${path}`,
+		// Per-RUN variant choices keyed "sceneId/layerId" (rollLayerImages at game
+		// start) — so revisiting a room shows the same art all run. Without it
+		// (editor previews) the component rolls locally, stable per mount.
+		picks
 	}: {
 		scene: Scene;
 		look?: { x: number; y: number };
 		resolve?: (path: string) => string;
+		picks?: Record<string, string>;
 	} = $props();
 
 	// Max parallax shift in px at full look (×1) and full parallaxFactor.
 	const AMP = 42;
 
-	const layers = $derived([...scene.layers].sort((a, b) => a.z - b.z));
+	// Which image a multi-image layer shows: the run-level pick when provided
+	// (same art all run), else a local pick — stable per mount, re-rolled only
+	// if the picked image is removed from the pool (editor preview comfort).
+	const localPicks: Record<string, string> = {};
+	function srcFor(l: SceneLayer): string | undefined {
+		const pool = layerImagePool(l);
+		if (!pool.length) return undefined;
+		const runPick = picks?.[`${scene.id}/${l.id}`];
+		if (runPick && pool.includes(runPick)) return runPick;
+		const prev = localPicks[l.id];
+		if (prev && pool.includes(prev)) return prev;
+		const next = pickLayerImage(l);
+		if (next) localPicks[l.id] = next;
+		return next;
+	}
+
+	const layers = $derived(
+		[...scene.layers].sort((a, b) => a.z - b.z).map((l) => ({ ...l, src: srcFor(l) }))
+	);
 </script>
 
 <div class="viewport" style:filter={scene.filter?.css ?? ''}>
 	{#each layers as layer (layer.id)}
-		<img
-			class="layer"
-			src={resolve(layer.imagePath)}
-			alt=""
-			style:z-index={layer.z}
-			style:transform={`translate3d(${(-look.x * layer.parallaxFactor * AMP).toFixed(2)}px, ${(-look.y * layer.parallaxFactor * AMP).toFixed(2)}px, 0) scale(1.12)`}
-		/>
+		{#if layer.src}
+			<img
+				class="layer"
+				src={resolve(layer.src)}
+				alt=""
+				style:z-index={layer.z}
+				style:transform={`translate3d(${(-look.x * layer.parallaxFactor * AMP).toFixed(2)}px, ${(-look.y * layer.parallaxFactor * AMP).toFixed(2)}px, 0) scale(1.12)`}
+			/>
+		{/if}
 	{/each}
 
 	{#if scene.filter?.overlay}

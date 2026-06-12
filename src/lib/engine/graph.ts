@@ -1,5 +1,5 @@
 // Condition evaluation + scene-graph traversal (SPEC §4.3, §6). Pure module.
-import type { Condition, Exit, GameState, Hotspot, Scene } from './types';
+import type { Condition, Exit, GameState, Hotspot, Scene, SceneLayer } from './types';
 
 /**
  * Evaluate a condition against the current state. Pure and total: an undefined
@@ -103,4 +103,45 @@ export function findScene(scenes: Scene[], sceneId: string): Scene | undefined {
  */
 export function rollGiveableItems(scene: Scene, rng: () => number = Math.random): string[] {
 	return (scene.giveableItems ?? []).filter((g) => rng() < g.chance).map((g) => g.itemId);
+}
+
+/**
+ * A layer's image pool: the variant list when present (blank entries ignored),
+ * else the legacy single imagePath. Empty = the layer has no art.
+ */
+export function layerImagePool(layer: SceneLayer): string[] {
+	const pool = (layer.imagePaths ?? []).filter((p) => p.trim());
+	if (pool.length) return pool;
+	return layer.imagePath?.trim() ? [layer.imagePath] : [];
+}
+
+/**
+ * Pick the image a layer shows — uniform across its pool. Pure; `rng` is
+ * injectable so tests can make the pick deterministic.
+ */
+export function pickLayerImage(
+	layer: SceneLayer,
+	rng: () => number = Math.random
+): string | undefined {
+	const pool = layerImagePool(layer);
+	if (!pool.length) return undefined;
+	return pool[Math.min(pool.length - 1, Math.floor(rng() * pool.length))];
+}
+
+/**
+ * Roll ONCE PER RUN which variant every layer shows, keyed "sceneId/layerId"
+ * (layer ids repeat across scenes). Rolled at game start so leaving a room and
+ * coming straight back shows the same art; a new run re-rolls.
+ */
+export function rollLayerImages(
+	scenes: Scene[],
+	rng: () => number = Math.random
+): Record<string, string> {
+	const picks: Record<string, string> = {};
+	for (const s of scenes)
+		for (const l of s.layers) {
+			const img = pickLayerImage(l, rng);
+			if (img) picks[`${s.id}/${l.id}`] = img;
+		}
+	return picks;
 }

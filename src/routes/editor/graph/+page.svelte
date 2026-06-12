@@ -14,6 +14,7 @@
 		type GraphPositions
 	} from '$lib/content/draft';
 	import type { Scene } from '$lib/engine/types';
+	import { layerImagePool } from '$lib/engine/graph';
 
 	const nodeTypes = { scene: SceneNode };
 
@@ -51,7 +52,7 @@
 				isEnding: !!s.ending,
 				images: [...s.layers]
 					.sort((a, b) => a.z - b.z)
-					.map((l) => imgUrl(l.imagePath))
+					.map((l) => imgUrl(layerImagePool(l)[0] ?? ''))
 					.filter(Boolean)
 			}
 		}));
