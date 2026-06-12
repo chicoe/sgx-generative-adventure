@@ -5,7 +5,7 @@
 // first cue, which always follows a key press, so autoplay policy is satisfied
 // (the kiosk lifts it entirely via --autoplay-policy=no-user-gesture-required).
 
-export type SfxName = 'send' | 'receive' | 'use' | 'map' | 'door' | 'unlock';
+export type SfxName = 'send' | 'receive' | 'use' | 'get' | 'map' | 'door' | 'unlock';
 
 let ctx: AudioContext | null = null;
 
@@ -101,12 +101,21 @@ export function playSfx(name: SfxName): void {
 			tone(c, { freq: 330, dur: 0.06, type: 'triangle', vol: 0.22 });
 			tone(c, { at: 0.07, freq: 494, dur: 0.09, type: 'triangle', vol: 0.22 });
 			break;
+		case 'get': // item acquired: a rising chip fanfare with an octave shimmer
+			tone(c, { freq: 659, dur: 0.07, vol: 0.14 });
+			tone(c, { at: 0.07, freq: 784, dur: 0.07, vol: 0.14 });
+			tone(c, { at: 0.14, freq: 988, dur: 0.07, vol: 0.14 });
+			tone(c, { at: 0.21, freq: 1319, dur: 0.24, vol: 0.16 });
+			tone(c, { at: 0.21, freq: 2637, dur: 0.24, type: 'sine', vol: 0.07 });
+			break;
 		case 'map': // sonar-ish downward ping: the deck plan toggled
 			tone(c, { freq: 1175, to: 588, dur: 0.28, type: 'sine', vol: 0.18 });
 			break;
-		case 'door': // airlock: a low clunk + a pressurised hiss sweeping shut
-			tone(c, { freq: 90, dur: 0.12, vol: 0.08 });
-			noise(c, { at: 0.05, dur: 0.5, from: 1500, to: 150 });
+		case 'door': // full airlock cycle: bolt thunk → hiss → servo sweep → seated blip
+			tone(c, { freq: 120, to: 45, dur: 0.22, vol: 0.22 });
+			noise(c, { at: 0.08, dur: 0.7, from: 2200, to: 120, vol: 0.09 });
+			tone(c, { at: 0.18, freq: 180, to: 620, dur: 0.4, type: 'triangle', vol: 0.1 });
+			tone(c, { at: 0.62, freq: 880, dur: 0.1, vol: 0.12 });
 			break;
 		case 'unlock': // ascending major arpeggio: something opened up
 			tone(c, { freq: 523, dur: 0.07 });

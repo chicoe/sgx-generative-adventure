@@ -752,7 +752,7 @@
 				push('system', `[ already holding ${item.name} ]`);
 			} else {
 				game = applyEffects(game, [{ type: 'addItem', itemId: item.id }]);
-				playSfx('use');
+				playSfx('get');
 				push('system', `[ +item ${item.name} ]`);
 				convo = [
 					...convo,
@@ -833,6 +833,8 @@
 				);
 				game = applyEffects(game, data.appliedEffects);
 				const nav = data.appliedEffects.some((e) => e.type === 'goToScene');
+				// Gaining an item is a little victory — give it the fanfare.
+				if (data.appliedEffects.some((e) => e.type === 'addItem')) playSfx('get');
 				if (!nav) {
 					push('system', `[ ${data.appliedEffects.map(describeEffect).join(', ')} ]`);
 					// Engine-generated ground truth for the model: dialogue earlier in the
