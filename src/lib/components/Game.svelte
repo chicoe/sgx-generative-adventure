@@ -57,12 +57,12 @@
 	let failed = $state(false);
 	let game = $state<GameState>(startGame(placeholderBuild).state);
 
-	// Boot splash: a full-screen, hardcoded-BLACK overlay (independent of the
-	// palette — it also kills the amber flash before the build's settings load)
-	// run once per experience start: page load and every post-ending restart.
-	// Sequence: the gif plays once (static/boot.gif, authored play-once so it
-	// freezes on its last frame) → holds that frame → fades to pure black for a
-	// beat → fades into the live screen.
+	// Boot splash: a full-screen overlay (hardcoded BLACK while loading — it also
+	// kills any colour flash before the build's settings arrive). The gif runs
+	// once per experience start, AFTER the intake interview, bridging into the
+	// game. Sequence: the gif plays once (static/boot.gif, authored play-once so
+	// it freezes on its last frame) → holds that frame → a beat on the bare
+	// window → fades into the live screen.
 	const BOOT_GIF_MS = 4500; // static/boot.gif measured at 4.5s (51 frames)
 	const BOOT_HOLD_MS = 1000; // last frame stays up
 	const BOOT_BLACK_MS = 1000; // pure black between the gif and the game
@@ -171,16 +171,27 @@
 		};
 		profileTurn = turn;
 		convo = [...convo, turn];
-		// Fade to the background colour over the form, swap to the game underneath,
-		// then fade the cover away into it.
+		// Fade to the background colour over the form, then run the boot gif; the
+		// game (and its opening greeting) follows once the boot finishes.
 		introFading = true;
 		setTimeout(() => {
+			startBoot(); // the splash (gif → black beat) covers the swap to the game
 			introActive = false;
-			vitalsStartedAt = Date.now(); // the countdown starts with the game, not the form
-			void afterEnter();
-			setTimeout(() => (introFading = false), 250);
+			introFading = false;
+			pendingOpening = true;
 		}, INTRO_FADE_MS + 150);
 	}
+
+	// Fires the opening greeting only once the post-interview boot has finished,
+	// so its line types out on screen (not hidden behind the splash).
+	let pendingOpening = false;
+	$effect(() => {
+		if (pendingOpening && bootPhase === 'done' && !loading) {
+			pendingOpening = false;
+			vitalsStartedAt = Date.now(); // the countdown starts with the game itself
+			void afterEnter();
+		}
+	});
 
 	function introRecord(a: string) {
 		pushIntro('player', a);
@@ -561,9 +572,8 @@
 	async function restart() {
 		clearEndingTimer();
 		atEnding = false;
-		startBoot(); // the booting animation replays on every fresh run
 		initFrom(build); // picks a fresh random start, resets transcript + state
-		beginIntro(); // the next player answers the questionnaire again
+		beginIntro(); // the next player answers the questionnaire again (gif after)
 	}
 
 	async function sendMessage() {
@@ -757,7 +767,11 @@
 		if (!pending && !loading && !introActive) inputEl?.focus();
 	});
 	function refocus() {
-		setTimeout(() => inputEl?.focus(), 0);
+		// Never wrestle the questionnaire for focus — its input owns the keyboard
+		// while the interview is up.
+		setTimeout(() => {
+			if (!introActive) inputEl?.focus();
+		}, 0);
 	}
 
 	// Spinning processing cursor while the computer is thinking.
@@ -772,9 +786,9 @@
 	onMount(() => {
 		computeScale();
 		const clockId = setInterval(() => (clockNow = Date.now()), 1000);
-		// The boot gif does NOT start here: it waits for the build (palette +
-		// screen geometry) so it never flashes the default colours — the splash
-		// stays pure black until the data is in (startBoot in loadBuild's then).
+		// Nothing visual starts here: the splash stays pure black until the build
+		// (palette + geometry) is in, then the interview shows; the boot gif runs
+		// after the interview (startBoot in finishIntro).
 		let unsubLive: (() => void) | undefined;
 		// Live-update: when the editor publishes a different version, reload the
 		// whole page so the kiosk picks up new content (and any new app code) —
@@ -806,8 +820,8 @@
 				build = loaded;
 				initFrom(loaded);
 				loading = false; // reveal the resolved build
-				startBoot(); // palette + geometry are real now — run the boot gif
-				beginIntro(); // questionnaire first; the greeting follows it
+				bootPhase = 'done'; // no gif yet — the splash drops straight into the
+				beginIntro(); // interview; the gif plays AFTER it (finishIntro)
 				watchLive(source === 'firestore' ? `build-${loaded.meta.version}` : null);
 			})
 			.catch(() => {
@@ -1032,10 +1046,16 @@
 
 				{#if introActive}
 					{@const q = INTRO_QUESTIONS[introStep]}
+					<!-- Opaque, non-fading shield: the game underneath must never show
+					     through while the interview (or the splash above it) fades. -->
+					<div
+						class="introshield"
+						style:background={display.mode === 'full' ? display.bg : '#000000'}
+					></div>
 					<!-- Intake questionnaire: the SAME chatbox, just larger — a .terminal
 					     spanning the window from bottom to top (geometry overridden, every
 					     other style shared); questions type out, history scrolls up. -->
-					<section class="terminal intro">
+					<section class="terminal intro" in:fade={{ duration: 400 }}>
 						<div class="transcript" bind:this={introScrollEl}>
 							{#each introLines as line (line.id)}
 								<p class={line.who} class:latest={line.id === introQuestionLineId}>
@@ -1052,7 +1072,10 @@
 								bind:this={introInputEl}
 								bind:value={introAnswer}
 								use:autofocus
-								onblur={() => setTimeout(() => introInputEl?.focus(), 0)}
+								onblur={() =>
+									setTimeout(() => {
+										if (introActive) introInputEl?.focus();
+									}, 0)}
 								autocomplete="off"
 								spellcheck="false"
 								placeholder={q.kind === 'text' ? 'type your answer…' : 'press a key, 1 to 9…'}
@@ -1191,6 +1214,13 @@
 	   free space above until the log fills the box, then scrolling takes over. */
 	.terminal.intro .transcript p:first-child {
 		margin-top: auto;
+	}
+	/* Sits under the interview, over the game: bg-coloured, never transparent —
+	   so the interview's fade-in can only ever reveal the background colour. */
+	.introshield {
+		position: absolute;
+		inset: 0;
+		z-index: 59;
 	}
 	/* The fade between the finished form and the live game (bg colour; in duotone
 	   pure black maps onto it). */
