@@ -67,6 +67,12 @@ describe('buildPrompt', () => {
 		expect(systemInstruction).toContain('keycard');
 	});
 
+	it('forbids granting more than one item per turn and narrating fake additions', () => {
+		const { systemInstruction } = buildPrompt(behaviour, [], 'hi');
+		expect(systemInstruction).toContain('AT MOST ONE thing this turn');
+		expect(systemInstruction).toContain('NEVER list multiple items as "added"');
+	});
+
 	it('includes item descriptions for inventory and giveable items', () => {
 		const { systemInstruction } = buildPrompt(behaviour, [], 'hi', {
 			name: 'Cryo Pod',

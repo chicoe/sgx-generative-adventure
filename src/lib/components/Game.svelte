@@ -62,6 +62,15 @@
 	// discrete black "please restart" page — placeholder content never runs.
 	let loading = $state(true);
 	let failed = $state(false);
+	// This experience targets Chrome/Chromium (the kiosk runs Chromium). On any
+	// other engine (Firefox, Safari) show a one-time notice over the boot, which
+	// any key/click dismisses. Chromium browsers expose `userAgentData`; others
+	// don't, and the UA regex is a belt-and-braces fallback.
+	let browserWarn = $state(false);
+	function isChromium(): boolean {
+		if (typeof navigator === 'undefined') return true;
+		return 'userAgentData' in navigator || /\bChrom(e|ium)\//.test(navigator.userAgent);
+	}
 	let game = $state<GameState>(startGame(placeholderBuild).state);
 	// Per-run layer-art choices ("sceneId/layerId" → image) — rolled in initFrom.
 	let artPicks = $state<Record<string, string>>({});
@@ -117,6 +126,13 @@
 			setTimeout(() => (splashPhase = 'black'), SPLASH_HOLD_MS),
 			setTimeout(() => (splashPhase = 'done'), SPLASH_HOLD_MS + SPLASH_BLACK_MS)
 		];
+	}
+	// Skip straight past the current boot/intro splash (ESC — testing aid):
+	// jump to 'done' so whatever waits on it (interview / opening greeting) fires.
+	function skipSplash() {
+		if (splashKind === 'outro' || splashPhase === 'done' || loading) return;
+		splashTimers.forEach(clearTimeout);
+		splashPhase = 'done';
 	}
 	// A gif reports nothing — arm its configured play time once it has loaded.
 	function armGifEnd() {
@@ -944,12 +960,24 @@
 	const target = { x: 0, y: 0 };
 
 	function onKeydown(e: KeyboardEvent) {
+		// The browser notice is topmost: any key just dismisses it.
+		if (browserWarn) {
+			e.preventDefault();
+			browserWarn = false;
+			return;
+		}
 		// Waiting for the audio-unlocking gesture: any key starts the boot.
 		if (needsKeyToStart) {
 			e.preventDefault();
 			needsKeyToStart = false;
 			startSplash('boot');
 			beginIntro();
+			return;
+		}
+		// ESC skips the boot/intro splash video (testing aid).
+		if (e.key === 'Escape' && splashKind !== 'outro' && splashPhase !== 'done') {
+			e.preventDefault();
+			skipSplash();
 			return;
 		}
 		// At the outro's frozen last frame, ANY key starts the next cycle.
@@ -1019,6 +1047,7 @@
 
 	onMount(() => {
 		computeScale();
+		browserWarn = !isChromium();
 		const clockId = setInterval(() => (clockNow = Date.now()), 1000);
 		// Nothing visual starts here: the splash stays pure black until the build
 		// (palette + geometry) is in, then the BOOT gif opens the cycle and the
@@ -1092,6 +1121,27 @@
 
 <svelte:head><title>Adventure Engine — Play</title></svelte:head>
 <svelte:window onkeydown={onKeydown} onkeyup={onKeyup} onresize={computeScale} />
+
+{#if browserWarn}
+	<!-- Topmost, palette-independent (hardcoded colours): the build's theme may not
+	     be loaded yet. Any key (see onKeydown) or a click dismisses it. -->
+	<div
+		class="browserwarn"
+		role="button"
+		tabindex="0"
+		onclick={() => (browserWarn = false)}
+		onkeydown={() => (browserWarn = false)}
+	>
+		<div class="bw-box">
+			<p class="bw-title">⚠ BUILT FOR CHROME</p>
+			<p>
+				This experience is designed for <strong>Google Chrome / Chromium</strong>. In other browsers
+				some visuals, video or audio may not work as intended.
+			</p>
+			<p class="bw-hint">press any key to continue</p>
+		</div>
+	</div>
+{/if}
 
 {#if failed}
 	<!-- Discrete fail page: never placeholder content, never the palette. -->
@@ -1387,6 +1437,43 @@
 {/if}
 
 <style>
+	/* Browser notice: topmost, hardcoded amber-on-black (palette-independent). */
+	.browserwarn {
+		position: fixed;
+		inset: 0;
+		z-index: 500;
+		display: grid;
+		place-items: center;
+		padding: 2rem;
+		background: #000;
+		cursor: pointer;
+		font-family: var(--font-terminal, monospace);
+	}
+	.bw-box {
+		max-width: 30rem;
+		text-align: center;
+		color: #ffb000;
+		line-height: 1.6;
+		letter-spacing: 0.05em;
+	}
+	.bw-box p {
+		margin: 0 0 1rem;
+	}
+	.bw-title {
+		font-size: 1.2rem;
+		letter-spacing: 0.2em;
+	}
+	.bw-box strong {
+		color: #ffd980;
+	}
+	.bw-hint {
+		margin-top: 1.4rem;
+		font-size: 0.8rem;
+		color: #8a6a18;
+		letter-spacing: 0.2em;
+		animation: blink 1.1s steps(1) infinite;
+	}
+
 	.failpage {
 		position: fixed;
 		inset: 0;

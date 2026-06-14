@@ -273,7 +273,8 @@
 
 		<fieldset>
 			<legend
-				>backround layers (back → front by z — a layer with several images shows ONE at random per visit)</legend
+				>backround layers (back → front by z — a layer with several images shows ONE at random per
+				visit)</legend
 			>
 			{#each current.layers as layer, i (i)}
 				<div class="layer">

@@ -26,6 +26,11 @@
 
 	// Max parallax shift in px at full look (×1) and full parallaxFactor.
 	const AMP = 42;
+	// Upscale headroom so a panning layer never reveals the backdrop at its edge.
+	// PROPORTIONAL to parallaxFactor: a static layer (factor 0) gets scale 1 — no
+	// upscale, so it stays pixel-crisp — and only moving layers pay the slight
+	// softness of a non-integer scale, in proportion to how far they actually pan.
+	const headroomScale = (parallaxFactor: number) => (1 + parallaxFactor * 0.14).toFixed(3);
 
 	// Which image a multi-image layer shows: the run-level pick when provided
 	// (same art all run), else a local pick — stable per mount, re-rolled only
@@ -56,7 +61,7 @@
 				src={resolve(layer.src)}
 				alt=""
 				style:z-index={layer.z}
-				style:transform={`translate3d(${(-look.x * layer.parallaxFactor * AMP).toFixed(2)}px, ${(-look.y * layer.parallaxFactor * AMP).toFixed(2)}px, 0) scale(1.12)`}
+				style:transform={`translate3d(${(-look.x * layer.parallaxFactor * AMP).toFixed(2)}px, ${(-look.y * layer.parallaxFactor * AMP).toFixed(2)}px, 0) scale(${headroomScale(layer.parallaxFactor)})`}
 			/>
 		{/if}
 	{/each}
