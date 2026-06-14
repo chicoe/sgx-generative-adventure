@@ -94,7 +94,7 @@ export const saveItem = (it: Item) =>
 	setDoc(doc(db(), 'draft', 'content', 'items', it.id), clean(it));
 export const deleteItem = (id: string) => deleteDoc(doc(db(), 'draft', 'content', 'items', id));
 
-/** Persist a scrubbed draft's scenes/behaviours/meta onto an open batch. */
+/** Persist a scrubbed draft's scenes/items/behaviours/meta onto an open batch. */
 function batchScrubbed(batch: ReturnType<typeof writeBatch>, cleaned: DraftContent) {
 	batch.set(
 		rootDoc(),
@@ -106,6 +106,8 @@ function batchScrubbed(batch: ReturnType<typeof writeBatch>, cleaned: DraftConte
 	);
 	for (const s of cleaned.scenes)
 		batch.set(doc(db(), 'draft', 'content', 'scenes', s.id), clean(s));
+	for (const it of cleaned.items)
+		batch.set(doc(db(), 'draft', 'content', 'items', it.id), clean(it));
 	for (const b of cleaned.behaviours)
 		batch.set(doc(db(), 'draft', 'content', 'behaviours', b.id), clean(b));
 }

@@ -84,7 +84,9 @@ export const itemSchema = z.object({
 	id: z.string().min(1),
 	name: z.string(),
 	iconPath: z.string(),
-	description: z.string()
+	description: z.string(),
+	consumable: z.boolean().optional(), // one-use — spent when the computer uses it
+	transformsTo: z.string().optional() // itemId this becomes when transformed
 });
 
 export const outcomeSchema = z.object({

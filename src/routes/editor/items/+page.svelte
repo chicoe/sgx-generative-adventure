@@ -108,6 +108,21 @@
 				</div>
 			</div>
 			<label>description <input bind:value={item.description} /></label>
+			<label class="chk">
+				<input type="checkbox" bind:checked={item.consumable} /> consumable (one use — spent when used)
+			</label>
+			<label>
+				transforms into (consumes this, gives that)
+				<select
+					value={item.transformsTo ?? ''}
+					onchange={(e) => (item.transformsTo = e.currentTarget.value || undefined)}
+				>
+					<option value="">— none —</option>
+					{#each items.filter((o) => o.id !== item.id) as o (o.id)}
+						<option value={o.id}>{o.name || o.id}</option>
+					{/each}
+				</select>
+			</label>
 			<button type="button" onclick={() => save(item)} disabled={busy || uploading}>Save</button>
 		</div>
 	{:else}
@@ -131,6 +146,21 @@
 		</div>
 	</div>
 	<label>description <input bind:value={draftNew.description} /></label>
+	<label class="chk">
+		<input type="checkbox" bind:checked={draftNew.consumable} /> consumable (one use — spent when used)
+	</label>
+	<label>
+		transforms into (consumes this, gives that)
+		<select
+			value={draftNew.transformsTo ?? ''}
+			onchange={(e) => (draftNew.transformsTo = e.currentTarget.value || undefined)}
+		>
+			<option value="">— none —</option>
+			{#each items as o (o.id)}
+				<option value={o.id}>{o.name || o.id}</option>
+			{/each}
+		</select>
+	</label>
 	<button type="button" onclick={create} disabled={busy || uploading}>Create</button>
 	{#if uploading}<span class="muted">uploading…</span>{/if}
 </div>
@@ -184,12 +214,23 @@
 		font-size: 0.75rem;
 		color: var(--ink-dim);
 	}
-	input {
+	input,
+	select {
 		font: inherit;
 		color: var(--ink);
 		background: #0c0e11;
 		border: 1px solid var(--line);
 		padding: 0.35rem 0.5rem;
+	}
+	/* Checkbox row: horizontal, no column stacking. */
+	label.chk {
+		flex-direction: row;
+		align-items: center;
+		gap: 0.4rem;
+	}
+	label.chk input {
+		width: auto;
+		padding: 0;
 	}
 	.icon {
 		display: flex;

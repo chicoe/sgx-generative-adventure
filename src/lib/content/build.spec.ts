@@ -84,6 +84,14 @@ describe('assembleBuild', () => {
 		expect(assembleBuild(bad, 1, 'now').errors.join(' ')).toContain('ghostItem');
 	});
 
+	it('flags an item transformsTo pointing at an unknown item', () => {
+		const bad: DraftContent = {
+			...validDraft,
+			items: [{ id: 'key', name: 'Key', iconPath: '', description: '', transformsTo: 'ghostItem' }]
+		};
+		expect(assembleBuild(bad, 1, 'now').errors.join(' ')).toContain('ghostItem');
+	});
+
 	it('rejects schema-invalid content', () => {
 		const bad = {
 			...validDraft,
@@ -192,6 +200,17 @@ describe('scrubDraft', () => {
 		expect(draft.behaviours[0].allowedOutcomes[0].effects).toEqual([]);
 		expect(draft.behaviours[0].onGrantedEffects).toEqual([]);
 		expect(removed).toHaveLength(3);
+		expect(assembleBuild(draft, 1, 'now').errors).toEqual([]);
+	});
+
+	it('clears an item transformsTo that points at a deleted item', () => {
+		const dirty: DraftContent = {
+			...validDraft,
+			items: [{ id: 'key', name: 'Key', iconPath: '', description: '', transformsTo: 'ghost' }]
+		};
+		const { draft, removed } = scrubDraft(dirty);
+		expect(draft.items[0].transformsTo).toBeUndefined();
+		expect(removed).toHaveLength(1);
 		expect(assembleBuild(draft, 1, 'now').errors).toEqual([]);
 	});
 

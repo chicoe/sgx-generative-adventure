@@ -560,7 +560,11 @@
 			// Items carry their authored description — that's where their meaning lives.
 			inventory: state.inventory.map((id) => {
 				const it = build.items.find((i) => i.id === id);
-				return { name: it?.name || id, description: it?.description || undefined };
+				return {
+					name: it?.name || id,
+					description: it?.description || undefined,
+					consumable: it?.consumable || undefined
+				};
 			}),
 			// Only offer items present this run that the player doesn't already hold.
 			giveable: presentGiveables
@@ -569,7 +573,18 @@
 					itemId: id,
 					label: itemName(id),
 					description: build.items.find((i) => i.id === id)?.description || undefined
-				}))
+				})),
+			// Held consumables the computer may spend (one-use → removeItem outcome).
+			consumables: state.inventory
+				.filter((id) => build.items.find((i) => i.id === id)?.consumable)
+				.map((id) => ({ itemId: id, label: itemName(id) })),
+			// Held items that can become another (transform → removeItem + addItem).
+			// Only when the target item still exists in the build.
+			transformables: state.inventory.flatMap((id) => {
+				const to = build.items.find((i) => i.id === id)?.transformsTo;
+				if (!to || !build.items.some((i) => i.id === to)) return [];
+				return [{ fromItemId: id, fromLabel: itemName(id), toItemId: to, toLabel: itemName(to) }];
+			})
 		};
 	}
 
@@ -860,8 +875,10 @@
 				);
 				game = applyEffects(game, data.appliedEffects);
 				const nav = data.appliedEffects.some((e) => e.type === 'goToScene');
-				// Gaining an item is a little victory — give it the fanfare.
+				// Gaining an item is a little victory — give it the fanfare; spending a
+				// consumable gets the softer "use" blip.
 				if (data.appliedEffects.some((e) => e.type === 'addItem')) playSfx('get');
+				else if (data.appliedEffects.some((e) => e.type === 'removeItem')) playSfx('use');
 				if (!nav) {
 					push('system', `[ ${data.appliedEffects.map(describeEffect).join(', ')} ]`);
 					// Engine-generated ground truth for the model: dialogue earlier in the

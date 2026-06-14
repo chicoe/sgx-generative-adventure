@@ -54,11 +54,30 @@ const requestSchema = z.object({
 			unlockable: z.array(z.object({ label: z.string(), exitId: z.string() })).optional(),
 			// Items include their authored description — important info for the model.
 			inventory: z
-				.array(z.object({ name: z.string(), description: z.string().optional() }))
+				.array(
+					z.object({
+						name: z.string(),
+						description: z.string().optional(),
+						consumable: z.boolean().optional()
+					})
+				)
 				.optional(),
 			giveable: z
 				.array(
 					z.object({ label: z.string(), itemId: z.string(), description: z.string().optional() })
+				)
+				.optional(),
+			// Held one-use items the computer can spend (synthesized consume outcomes).
+			consumables: z.array(z.object({ label: z.string(), itemId: z.string() })).optional(),
+			// Held items that can become another (synthesized transform outcomes).
+			transformables: z
+				.array(
+					z.object({
+						fromItemId: z.string(),
+						fromLabel: z.string(),
+						toItemId: z.string(),
+						toLabel: z.string()
+					})
 				)
 				.optional()
 		})
@@ -99,7 +118,9 @@ export const POST: RequestHandler = async ({ request }) => {
 		await resolveBehaviour(body),
 		body.sceneContext?.exits,
 		body.sceneContext?.giveable,
-		body.sceneContext?.unlockable
+		body.sceneContext?.unlockable,
+		body.sceneContext?.consumables,
+		body.sceneContext?.transformables
 	);
 	const history = body.history as ConversationTurn[];
 

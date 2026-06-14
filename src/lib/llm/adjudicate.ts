@@ -32,6 +32,8 @@ export function resolveEffects(behaviour: LLMBehaviour, outcome: Outcome): Effec
 const EXIT_OUTCOME_PREFIX = 'exit:';
 const GRANT_OUTCOME_PREFIX = 'grant:';
 const UNLOCK_OUTCOME_PREFIX = 'unlock:';
+const CONSUME_OUTCOME_PREFIX = 'consume:';
+const TRANSFORM_OUTCOME_PREFIX = 'transform:';
 export const NEUTRAL_OUTCOME_ID = '__none__';
 // No effects — the client reacts to this id by opening the deck-plan overlay.
 export const MAP_OUTCOME_ID = '__map__';
@@ -51,14 +53,26 @@ export function isUnlockOutcomeId(id: string): boolean {
 	return id.startsWith(UNLOCK_OUTCOME_PREFIX);
 }
 
-/** Synthesized outcomes (neutral/map/exits/grants/unlocks) never carry behaviour-level effects. */
+/** True for a synthesized "spend a consumable item the player holds" outcome. */
+export function isConsumeOutcomeId(id: string): boolean {
+	return id.startsWith(CONSUME_OUTCOME_PREFIX);
+}
+
+/** True for a synthesized "turn one held item into another" outcome. */
+export function isTransformOutcomeId(id: string): boolean {
+	return id.startsWith(TRANSFORM_OUTCOME_PREFIX);
+}
+
+/** Synthesized outcomes (neutral/map/exits/grants/unlocks/consumes/transforms) never carry behaviour-level effects. */
 export function isSyntheticOutcomeId(id: string): boolean {
 	return (
 		id === NEUTRAL_OUTCOME_ID ||
 		id === MAP_OUTCOME_ID ||
 		isExitOutcomeId(id) ||
 		isGrantOutcomeId(id) ||
-		isUnlockOutcomeId(id)
+		isUnlockOutcomeId(id) ||
+		isConsumeOutcomeId(id) ||
+		isTransformOutcomeId(id)
 	);
 }
 
@@ -75,7 +89,9 @@ export function withSyntheticOutcomes(
 	behaviour: LLMBehaviour,
 	exits: { label: string; toSceneId: string }[] = [],
 	grantables: { label: string; itemId: string }[] = [],
-	unlockables: { label: string; exitId: string }[] = []
+	unlockables: { label: string; exitId: string }[] = [],
+	consumables: { label: string; itemId: string }[] = [],
+	transforms: { fromItemId: string; fromLabel: string; toItemId: string; toLabel: string }[] = []
 ): LLMBehaviour {
 	const ids = new Set(behaviour.allowedOutcomes.map((o) => o.id));
 	const extra: Outcome[] = [];
@@ -128,6 +144,33 @@ export function withSyntheticOutcomes(
 			label: `Unlock "${u.label}" — the player opens it with an item they carry (does not move them)`,
 			granted: true,
 			effects: [{ type: 'setFlag', key: `unlocked:${u.exitId}`, value: true }]
+		});
+	}
+	for (const c of consumables) {
+		const id = `${CONSUME_OUTCOME_PREFIX}${c.itemId}`;
+		if (ids.has(id)) continue;
+		ids.add(id);
+		extra.push({
+			id,
+			label: `Use up "${c.label}" (item ${c.itemId}) — spends it; it leaves the inventory`,
+			granted: true,
+			effects: [{ type: 'removeItem', itemId: c.itemId }]
+		});
+	}
+	// One outcome, two effects: remove the source item and add the target — so a
+	// transform is atomic and the model still picks just ONE outcomeId.
+	for (const t of transforms) {
+		const id = `${TRANSFORM_OUTCOME_PREFIX}${t.fromItemId}`;
+		if (ids.has(id)) continue;
+		ids.add(id);
+		extra.push({
+			id,
+			label: `Transform "${t.fromLabel}" into "${t.toLabel}" — consumes ${t.fromItemId}, gives ${t.toItemId}`,
+			granted: true,
+			effects: [
+				{ type: 'removeItem', itemId: t.fromItemId },
+				{ type: 'addItem', itemId: t.toItemId }
+			]
 		});
 	}
 	return { ...behaviour, allowedOutcomes: [...behaviour.allowedOutcomes, ...extra] };

@@ -19,9 +19,11 @@ export interface SceneContext {
 	lockedExits?: { label: string; requires: string[] }[]; // sealed, player lacks the items (info only)
 	unlockable?: { label: string; exitId: string }[]; // sealed, but the player carries what opens it
 	// Items carry their authored description — it holds the important information
-	// about what an item is and does.
-	inventory?: { name: string; description?: string }[];
+	// about what an item is and does. `consumable` marks one-use items.
+	inventory?: { name: string; description?: string; consumable?: boolean }[];
 	giveable?: { label: string; itemId: string; description?: string }[]; // items the computer may hand over here
+	consumables?: { label: string; itemId: string }[]; // held one-use items the computer can spend
+	transformables?: { fromItemId: string; fromLabel: string; toLabel: string }[]; // held items that can become another
 }
 
 function sceneSection(scene: SceneContext): string {
@@ -50,9 +52,22 @@ function sceneSection(scene: SceneContext): string {
 		: '- (none)';
 	const inventory = scene.inventory?.length
 		? scene.inventory
-				.map((i) => `- ${i.name}${i.description ? ` — ${i.description}` : ''}`)
+				.map(
+					(i) =>
+						`- ${i.name}${i.consumable ? ' (CONSUMABLE — one use)' : ''}${i.description ? ` — ${i.description}` : ''}`
+				)
 				.join('\n')
 		: '- (empty)';
+	const consumables = scene.consumables?.length
+		? scene.consumables.map((c) => `- ${c.label} (use-up outcome "consume:${c.itemId}")`).join('\n')
+		: '';
+	const transformables = scene.transformables?.length
+		? scene.transformables
+				.map(
+					(t) => `- ${t.fromLabel} → ${t.toLabel} (transform outcome "transform:${t.fromItemId}")`
+				)
+				.join('\n')
+		: '';
 	return [
 		`CURRENT SCENE: ${scene.name ?? '(unnamed)'}`,
 		scene.prompt ? `SCENE NOTES: ${scene.prompt}` : '',
@@ -70,7 +85,15 @@ function sceneSection(scene: SceneContext): string {
 		'ITEMS PRESENT HERE THAT YOU CAN GIVE THE PLAYER:',
 		giveable,
 		'PLAYER INVENTORY (what each item is and does):',
-		inventory
+		inventory,
+		consumables
+			? 'CONSUMABLE ITEMS THE PLAYER HOLDS — using one up spends it (it leaves their inventory):'
+			: '',
+		consumables,
+		transformables
+			? 'ITEMS THE PLAYER CAN TRANSFORM — the transform swaps the first item for the second in one step:'
+			: '',
+		transformables
 	]
 		.filter(Boolean)
 		.join('\n');
@@ -144,6 +167,13 @@ export function buildPrompt(
 		'  plainly and never claim otherwise. When the player asks for a listed item (a brief reason',
 		'  helps but is not required), hand over ONE by choosing its grant outcome. Never invent, offer,',
 		'  promise, or "add" an item that is not on that list.',
+		'- CONSUMABLE items are one-use. When the player actually uses one up (spends it on something this',
+		'  turn), pick its "consume:" outcome — the engine then removes it from their inventory. Only',
+		'  consume an item when it is genuinely spent; merely talking about or examining it does not.',
+		'- A TRANSFORM turns one held item into another in a single step (the first is removed, the second',
+		'  added). When the player does the thing that changes it (e.g. writes on the paper to make a',
+		'  letter), pick that "transform:" outcome. Only transform when the change actually happens this',
+		'  turn — not for idle talk about it.',
 		'- Most turns are ordinary conversation: when no listed action or exit clearly applies, pick the',
 		'  "no change" outcome and simply reply. Only pick an action or exit outcome when the player',
 		'  clearly intends it.',

@@ -107,6 +107,10 @@ function validateReferences(draft: DraftContent): string[] {
 			itemRef(g.itemId, `scene "${scene.id}" giveable item`);
 	}
 
+	for (const item of draft.items) {
+		if (item.transformsTo) itemRef(item.transformsTo, `item "${item.id}" transformsTo`);
+	}
+
 	for (const b of draft.behaviours) {
 		const all = [
 			...b.onGrantedEffects,
@@ -208,6 +212,15 @@ export function scrubDraft(draft: DraftContent): ScrubResult {
 		}))
 	}));
 
+	// Clear an item's transform target if it points at a deleted item.
+	const items = draft.items.map((it) => {
+		if (it.transformsTo && !itemIds.has(it.transformsTo)) {
+			removed.push(`item "${it.id}": cleared transformsTo (missing item "${it.transformsTo}")`);
+			return { ...it, transformsTo: undefined };
+		}
+		return it;
+	});
+
 	const meta = { ...draft.meta };
 	if (meta.startSceneId && !sceneIds.has(meta.startSceneId)) {
 		const fallback = scenes.find((s) => s.start)?.id ?? scenes[0]?.id ?? '';
@@ -219,7 +232,7 @@ export function scrubDraft(draft: DraftContent): ScrubResult {
 		meta.defaultBehaviourId = undefined;
 	}
 
-	return { draft: { meta, scenes, items: draft.items, behaviours }, removed };
+	return { draft: { meta, scenes, items, behaviours }, removed };
 }
 
 /**

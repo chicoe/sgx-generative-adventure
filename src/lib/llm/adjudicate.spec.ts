@@ -98,6 +98,32 @@ describe('withSyntheticOutcomes', () => {
 		expect(unlock?.effects).toEqual([{ type: 'setFlag', key: 'unlocked:e1', value: true }]);
 		expect(isSyntheticOutcomeId('unlock:e1')).toBe(true);
 	});
+
+	it('adds one granted removeItem outcome per held consumable', () => {
+		const aug = withSyntheticOutcomes(behaviour, [], [], [], [{ label: 'Gum', itemId: 'gum' }]);
+		const consume = findOutcome(aug, 'consume:gum');
+		expect(consume?.granted).toBe(true);
+		expect(consume?.effects).toEqual([{ type: 'removeItem', itemId: 'gum' }]);
+		expect(isSyntheticOutcomeId('consume:gum')).toBe(true);
+	});
+
+	it('adds one transform outcome (remove source + add target) per transformable', () => {
+		const aug = withSyntheticOutcomes(
+			behaviour,
+			[],
+			[],
+			[],
+			[],
+			[{ fromItemId: 'paper', fromLabel: 'Paper', toItemId: 'letter', toLabel: 'Letter' }]
+		);
+		const transform = findOutcome(aug, 'transform:paper');
+		expect(transform?.granted).toBe(true);
+		expect(transform?.effects).toEqual([
+			{ type: 'removeItem', itemId: 'paper' },
+			{ type: 'addItem', itemId: 'letter' }
+		]);
+		expect(isSyntheticOutcomeId('transform:paper')).toBe(true);
+	});
 });
 
 describe('resolveEffects', () => {

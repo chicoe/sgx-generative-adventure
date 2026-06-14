@@ -101,6 +101,12 @@ export interface Item {
 	name: string;
 	iconPath: string;
 	description: string;
+	// One-use: when the computer spends it (the player uses it up), the engine
+	// removes it from the inventory.
+	consumable?: boolean;
+	// Transform: the itemId this becomes when the computer transforms it — one
+	// outcome that removes this item and adds the target (e.g. paper → letter).
+	transformsTo?: string;
 }
 
 // ---------------------------------------------------------------------------
