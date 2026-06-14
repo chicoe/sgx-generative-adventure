@@ -65,9 +65,12 @@
 						id: `${s.id}::${x.id}`,
 						source: s.id,
 						target: x.toSceneId,
-						label: (x.label || '') + (locked ? ' 🔒' : '') || undefined,
+						// No label: it covered the line and swallowed clicks. Locked = dashed;
+						// the floating editor shows the label / lock details when selected.
 						// dashed = locked behind items; arrows on both ends = two-way door
 						style: `stroke: #38e08a;${locked ? ' stroke-dasharray: 7 4;' : ''}`,
+						// Wide invisible band so the thin line is easy to click.
+						interactionWidth: 28,
 						markerEnd: { type: MarkerType.ArrowClosed, color: '#38e08a', width: 18, height: 18 },
 						...(x.oneWay
 							? {}
@@ -146,9 +149,14 @@
 	}
 
 	function selectEdge(edge: Edge) {
+		// Prefer edge.data; fall back to the edge id (`${sceneId}::${exitId}`) since
+		// custom data may not survive xyflow's internal round-trip.
 		const data = edge.data as { sceneId?: string; exitId?: string } | undefined;
-		const scene = data?.sceneId ? scenes.find((s) => s.id === data.sceneId) : undefined;
-		const exit = data?.exitId ? scene?.exits.find((x) => x.id === data.exitId) : undefined;
+		const sep = edge.id.indexOf('::');
+		const sceneId = data?.sceneId ?? (sep >= 0 ? edge.id.slice(0, sep) : undefined);
+		const exitId = data?.exitId ?? (sep >= 0 ? edge.id.slice(sep + 2) : undefined);
+		const scene = sceneId ? scenes.find((s) => s.id === sceneId) : undefined;
+		const exit = exitId ? scene?.exits.find((x) => x.id === exitId) : undefined;
 		if (!scene || !exit) return;
 		selectedExit = {
 			sceneId: scene.id,
@@ -202,10 +210,13 @@
 
 	async function removeEdge(edge: Edge) {
 		const data = edge.data as { sceneId?: string; exitId?: string } | undefined;
-		const scene = data?.sceneId ? scenes.find((s) => s.id === data.sceneId) : undefined;
-		if (!scene || !data?.exitId) return;
+		const sep = edge.id.indexOf('::');
+		const sceneId = data?.sceneId ?? (sep >= 0 ? edge.id.slice(0, sep) : undefined);
+		const exitId = data?.exitId ?? (sep >= 0 ? edge.id.slice(sep + 2) : undefined);
+		const scene = sceneId ? scenes.find((s) => s.id === sceneId) : undefined;
+		if (!scene || !exitId) return;
 		try {
-			await saveScene({ ...scene, exits: scene.exits.filter((x) => x.id !== data.exitId) });
+			await saveScene({ ...scene, exits: scene.exits.filter((x) => x.id !== exitId) });
 			message = 'Removed exit.';
 			await refresh();
 		} catch (e) {
@@ -244,67 +255,72 @@
 </div>
 <p class="hint">
 	drag between nodes to connect — links are <strong>two-way doors</strong> by default (arrows on both
-	ends) · click a link to edit it (label, one-way, required items 🔒) · drag nodes to arrange (saved)
-	· click a node to edit
+	ends; dashed = locked 🔒) · click a link line to edit it (label, one-way, required items) · drag nodes
+	to arrange (saved) · click a node to edit
 </p>
 
-{#if selectedExit}
-	<div class="edge-editor">
-		<div class="row1">
-			<span class="route"
-				>{selectedExit.from}
-				{selectedExit.oneWay ? '→' : '↔'}
-				{selectedExit.to}</span
-			>
-			<input placeholder="exit label" bind:value={selectedExit.label} />
-			<label class="chk"><input type="checkbox" bind:checked={selectedExit.oneWay} /> one-way</label
-			>
-			<button type="button" onclick={saveExit}>Save</button>
-			<button type="button" class="del" onclick={removeSelectedExit}>Remove link</button>
-			<button type="button" class="x" onclick={() => (selectedExit = null)}>✕</button>
-		</div>
-		<div class="row2">
-			<span class="lbl">🔒 locked — opens with <strong>any</strong> of:</span>
-			{#each selectedExit.requiredItems as id (id)}
-				<span class="chip"
-					>{id}<button type="button" class="chip-x" onclick={() => toggleRequiredItem(id)}>✕</button
-					></span
+<div class="graph-wrap">
+	{#if selectedExit}
+		<div class="edge-editor floating">
+			<div class="row1">
+				<span class="route"
+					>{selectedExit.from}
+					{selectedExit.oneWay ? '→' : '↔'}
+					{selectedExit.to}</span
 				>
-			{:else}
-				<span class="lbl">(none — door is open)</span>
-			{/each}
-			<select
-				class="additem"
-				onchange={(e) => {
-					if (e.currentTarget.value) toggleRequiredItem(e.currentTarget.value);
-					e.currentTarget.value = '';
-				}}
-			>
-				<option value="">+ add item…</option>
-				{#each itemIds.filter((i) => !selectedExit!.requiredItems.includes(i)) as id (id)}
-					<option value={id}>{id}</option>
+				<input placeholder="exit label" bind:value={selectedExit.label} />
+				<label class="chk"
+					><input type="checkbox" bind:checked={selectedExit.oneWay} /> one-way</label
+				>
+				<button type="button" onclick={saveExit}>Save</button>
+				<button type="button" class="del" onclick={removeSelectedExit}>Remove link</button>
+				<button type="button" class="x" onclick={() => (selectedExit = null)}>✕</button>
+			</div>
+			<div class="row2">
+				<span class="lbl">🔒 locked — opens with <strong>any</strong> of:</span>
+				{#each selectedExit.requiredItems as id (id)}
+					<span class="chip"
+						>{id}<button type="button" class="chip-x" onclick={() => toggleRequiredItem(id)}
+							>✕</button
+						></span
+					>
+				{:else}
+					<span class="lbl">(none — door is open)</span>
 				{/each}
-			</select>
+				<select
+					class="additem"
+					onchange={(e) => {
+						if (e.currentTarget.value) toggleRequiredItem(e.currentTarget.value);
+						e.currentTarget.value = '';
+					}}
+				>
+					<option value="">+ add item…</option>
+					{#each itemIds.filter((i) => !selectedExit!.requiredItems.includes(i)) as id (id)}
+						<option value={id}>{id}</option>
+					{/each}
+				</select>
+			</div>
 		</div>
-	</div>
-{/if}
+	{/if}
 
-<div class="graph">
-	<SvelteFlow
-		bind:nodes
-		bind:edges
-		{nodeTypes}
-		fitView
-		colorMode="dark"
-		onnodeclick={({ node }) => openScene(node.id)}
-		onnodedragstop={() => persistPositions()}
-		onedgeclick={({ edge }) => selectEdge(edge)}
-		onconnect={onConnect}
-		ondelete={({ edges: del }) => del.forEach((e) => removeEdge(e))}
-	>
-		<Background />
-		<Controls />
-	</SvelteFlow>
+	<div class="graph">
+		<SvelteFlow
+			bind:nodes
+			bind:edges
+			{nodeTypes}
+			fitView
+			colorMode="dark"
+			proOptions={{ hideAttribution: true }}
+			onnodeclick={({ node }) => openScene(node.id)}
+			onnodedragstop={() => persistPositions()}
+			onedgeclick={({ edge }) => selectEdge(edge)}
+			onconnect={onConnect}
+			ondelete={({ edges: del }) => del.forEach((e) => removeEdge(e))}
+		>
+			<Background />
+			<Controls />
+		</SvelteFlow>
+	</div>
 </div>
 
 <style>
@@ -428,9 +444,23 @@
 	.edge-editor .del {
 		color: #e0a8a8;
 	}
+	.graph-wrap {
+		position: relative;
+		margin-top: 0.8rem;
+	}
 	.graph {
 		height: 70vh;
-		margin-top: 0.8rem;
 		border: 1px solid var(--line);
+	}
+	/* The edge editor floats over the top of the graph so it's always visible
+	   the moment you click a link (no scrolling up to find it). */
+	.edge-editor.floating {
+		position: absolute;
+		top: 0.5rem;
+		left: 0.5rem;
+		right: 0.5rem;
+		z-index: 10;
+		margin-top: 0;
+		box-shadow: 0 4px 18px rgba(0, 0, 0, 0.5);
 	}
 </style>
