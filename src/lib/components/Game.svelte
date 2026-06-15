@@ -15,8 +15,8 @@
 	import { loadActiveBuild } from '$lib/content/loader';
 	import { doc, onSnapshot } from 'firebase/firestore';
 	import { db } from '$lib/firebase/client';
-	import { MAP_OUTCOME_ID } from '$lib/llm/adjudicate';
-	import { audioUnlocked, playSfx } from '$lib/sfx';
+	import { MAP_OUTCOME_ID, SCAN_OUTCOME_ID } from '$lib/llm/adjudicate';
+	import { audioUnlocked, playSfx, playDrone } from '$lib/sfx';
 	import { DEFAULT_DISPLAY, themeStyle, duotoneTable, crtBackground } from '$lib/theme';
 	import type { Build, ConversationTurn, Effect, GameState, Item, Scene } from '$lib/engine/types';
 
@@ -434,6 +434,57 @@
 	// with id "map", or when the computer picks the __map__ outcome.
 	let mapOpen = $state(false);
 
+	// Scanner: a quadrant sweep — the scene is divided into a grid and targeting
+	// brackets light up one cell at a time, snaking through the whole image. It
+	// beeps once per interactable thing here (exits + items present); the computer's
+	// reply carries the actual hint. Triggered by the __scan__ outcome.
+	let scanning = $state(false);
+	let scanCell = $state(-1); // DOM index of the cell lit right now (-1 = none)
+	let scanTimers: ReturnType<typeof setTimeout>[] = [];
+	const SCAN_COLS = 4;
+	const SCAN_ROWS = 3;
+	const SCAN_CELLS = SCAN_COLS * SCAN_ROWS;
+	const SCAN_SWEEP_MS = 5200; // a slow, deliberate sweep
+	// Boustrophedon (snake) order through the grid so the lit cell never jumps.
+	function scanOrder(): number[] {
+		const order: number[] = [];
+		for (let r = 0; r < SCAN_ROWS; r++)
+			for (let c = 0; c < SCAN_COLS; c++) {
+				const col = r % 2 === 0 ? c : SCAN_COLS - 1 - c;
+				order.push(r * SCAN_COLS + col);
+			}
+		return order;
+	}
+	function runScan() {
+		scanTimers.forEach(clearTimeout);
+		// Count what's interactable in this room: available doors + items present
+		// this run the player hasn't taken yet.
+		const doors = availableDoors(build.scenes, scene, game).length;
+		const items = presentGiveables.filter((id) => !game.inventory.includes(id)).length;
+		const beeps = Math.max(1, doors + items); // always at least one ping
+		scanning = true;
+		scanCell = -1;
+		playDrone(SCAN_SWEEP_MS); // a continuous bed under the pings
+		// Light each cell in turn across the sweep.
+		const cellMs = SCAN_SWEEP_MS / SCAN_CELLS;
+		scanOrder().forEach((cellIdx, step) =>
+			scanTimers.push(setTimeout(() => (scanCell = cellIdx), step * cellMs))
+		);
+		// Spread the radar pings across the sweep (a fixed cadence, but never
+		// overrunning the sweep when there are many things to ping).
+		const start = 400;
+		const span = SCAN_SWEEP_MS - start - 300;
+		const gap = beeps > 1 ? Math.min(420, span / (beeps - 1)) : 0;
+		for (let i = 0; i < beeps; i++)
+			scanTimers.push(setTimeout(() => playSfx('scan'), start + i * gap));
+		scanTimers.push(
+			setTimeout(() => {
+				scanning = false;
+				scanCell = -1;
+			}, SCAN_SWEEP_MS)
+		);
+	}
+
 	// Left-hand inventory HUD: the player's items (first 9, mapped to keys 1–9).
 	const itemName = (id: string) => build.items.find((i) => i.id === id)?.name ?? id;
 	const imgUrl = (p: string) =>
@@ -616,6 +667,9 @@
 		greeted = {};
 		cameFromId = null;
 		mapOpen = false;
+		scanTimers.forEach(clearTimeout);
+		scanning = false;
+		scanCell = -1;
 		vitalsStartedAt = Date.now(); // a fresh run starts at full(ish) vitals
 		enterScene(b, started.state, started.messages);
 	}
@@ -754,6 +808,11 @@
 			return true;
 		}
 
+		if (cmd === 'sgx scan') {
+			runScan(); // just the visual + beeps (no LLM hint)
+			return true;
+		}
+
 		// State-mutating overrides wait their turn behind a pending reply.
 		if (pending) {
 			push('system', '[ computer busy — try the override again in a moment ]');
@@ -810,7 +869,7 @@
 
 		push(
 			'system',
-			'[ unknown override — known: "sgx restart" · "sgx next room" · "sgx rooms" · "sgx go to <room>" · "sgx items" · "sgx get <item>" ]'
+			'[ unknown override — known: "sgx restart" · "sgx next room" · "sgx rooms" · "sgx go to <room>" · "sgx items" · "sgx get <item>" · "sgx scan" ]'
 		);
 		return true;
 	}
@@ -863,6 +922,9 @@
 				mapOpen = true;
 				playSfx('map');
 			}
+			// …or run the room scanner: a screen sweep + a beep per interactable here
+			// (the reply itself carries the hint).
+			if (data.outcomeId === SCAN_OUTCOME_ID) runScan();
 
 			if (data.appliedEffects.length) {
 				const prev = game.currentSceneId;
@@ -1131,6 +1193,7 @@
 			cancelAnimationFrame(raf);
 			clearInterval(clockId);
 			splashTimers.forEach(clearTimeout);
+			scanTimers.forEach(clearTimeout);
 			unsubLive?.();
 		};
 	});
@@ -1233,6 +1296,18 @@
 								{/if}
 							</div>
 						{/key}
+						{#if scanning}
+							<div
+								class="scangrid"
+								aria-hidden="true"
+								style:grid-template-columns={`repeat(${SCAN_COLS}, 1fr)`}
+								style:grid-template-rows={`repeat(${SCAN_ROWS}, 1fr)`}
+							>
+								{#each Array.from({ length: SCAN_CELLS }) as _cell, i (i)}
+									<div class="scancell" class:active={i === scanCell}></div>
+								{/each}
+							</div>
+						{/if}
 					</div>
 
 					<div class="hud">
@@ -1677,6 +1752,58 @@
 	.scene-holder {
 		position: absolute;
 		inset: 0;
+	}
+
+	/* Scanner: a quadrant grid over the scene. One cell at a time lights up with
+	   targeting brackets (snaking through the whole image), as if each area is
+	   scanned independently. Brackets are SOLID ink so they survive the hard-colour
+	   (duotone) filter; `screen` blend also brightens the cell behind them. */
+	.scangrid {
+		position: absolute;
+		inset: 0;
+		/* Below the HUD (z-index 40) so the inventory + deck plan sit on top of it,
+		   but above the scene art. */
+		z-index: 5;
+		display: grid;
+		pointer-events: none;
+		mix-blend-mode: screen;
+	}
+	.scancell {
+		position: relative;
+	}
+	.scancell.active {
+		background: color-mix(in srgb, var(--ink) 36%, transparent);
+		box-shadow:
+			inset 0 0 28px color-mix(in srgb, var(--ink) 40%, transparent),
+			0 0 18px color-mix(in srgb, var(--ink) 30%, transparent);
+		animation: scan-cell 0.18s ease-out;
+	}
+	/* Four corner brackets drawn as 8 solid bars (two per corner). */
+	.scancell.active::before {
+		content: '';
+		position: absolute;
+		inset: 9%;
+		--b: 3px;
+		--len: 32%;
+		background:
+			linear-gradient(var(--ink), var(--ink)) left top / var(--len) var(--b) no-repeat,
+			linear-gradient(var(--ink), var(--ink)) left top / var(--b) var(--len) no-repeat,
+			linear-gradient(var(--ink), var(--ink)) right top / var(--len) var(--b) no-repeat,
+			linear-gradient(var(--ink), var(--ink)) right top / var(--b) var(--len) no-repeat,
+			linear-gradient(var(--ink), var(--ink)) left bottom / var(--len) var(--b) no-repeat,
+			linear-gradient(var(--ink), var(--ink)) left bottom / var(--b) var(--len) no-repeat,
+			linear-gradient(var(--ink), var(--ink)) right bottom / var(--len) var(--b) no-repeat,
+			linear-gradient(var(--ink), var(--ink)) right bottom / var(--b) var(--len) no-repeat;
+	}
+	@keyframes scan-cell {
+		from {
+			opacity: 0;
+			transform: scale(1.06);
+		}
+		to {
+			opacity: 1;
+			transform: scale(1);
+		}
 	}
 
 	/* "No signal" fallback for scenes with no art yet: palette-tinted TV snow. */

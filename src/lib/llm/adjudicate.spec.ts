@@ -6,7 +6,8 @@ import {
 	withSyntheticOutcomes,
 	isSyntheticOutcomeId,
 	NEUTRAL_OUTCOME_ID,
-	MAP_OUTCOME_ID
+	MAP_OUTCOME_ID,
+	SCAN_OUTCOME_ID
 } from './adjudicate';
 import type { LLMBehaviour } from '../engine/types';
 
@@ -72,6 +73,14 @@ describe('withSyntheticOutcomes', () => {
 		expect(map?.granted).toBe(true);
 		expect(map?.effects).toEqual([]);
 		expect(isSyntheticOutcomeId(MAP_OUTCOME_ID)).toBe(true);
+	});
+
+	it('always adds a run-the-scanner outcome (no effects — client-side reaction)', () => {
+		const aug = withSyntheticOutcomes(behaviour, []);
+		const scan = findOutcome(aug, SCAN_OUTCOME_ID);
+		expect(scan?.granted).toBe(true);
+		expect(scan?.effects).toEqual([]);
+		expect(isSyntheticOutcomeId(SCAN_OUTCOME_ID)).toBe(true);
 	});
 
 	it('adds one granted goToScene outcome per exit', () => {

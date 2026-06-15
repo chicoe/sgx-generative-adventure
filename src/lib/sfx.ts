@@ -5,7 +5,7 @@
 // first cue, which always follows a key press, so autoplay policy is satisfied
 // (the kiosk lifts it entirely via --autoplay-policy=no-user-gesture-required).
 
-export type SfxName = 'send' | 'receive' | 'use' | 'get' | 'map' | 'door' | 'unlock';
+export type SfxName = 'send' | 'receive' | 'use' | 'get' | 'map' | 'door' | 'unlock' | 'scan';
 
 let ctx: AudioContext | null = null;
 
@@ -84,6 +84,43 @@ export function audioUnlocked(): boolean {
 	return !!c && c.state === 'running';
 }
 
+/**
+ * A low, warm drone for the duration of the scanner sweep — so the scan always
+ * has a sound even in a room with nothing to ping. Detuned saws through a slowly
+ * sweeping lowpass, fading in and out. Safe to call anywhere (no-ops w/o audio).
+ */
+export function playDrone(durationMs: number): void {
+	const c = context();
+	if (!c) return;
+	const t0 = c.currentTime;
+	const dur = durationMs / 1000;
+	const g = c.createGain();
+	g.gain.setValueAtTime(0.0001, t0);
+	g.gain.exponentialRampToValueAtTime(0.06, t0 + 0.6);
+	g.gain.setValueAtTime(0.06, t0 + Math.max(0.7, dur - 0.8));
+	g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+	const f = c.createBiquadFilter();
+	f.type = 'lowpass';
+	f.frequency.setValueAtTime(200, t0);
+	f.frequency.linearRampToValueAtTime(460, t0 + dur * 0.5);
+	f.frequency.linearRampToValueAtTime(170, t0 + dur);
+	f.connect(g);
+	g.connect(c.destination);
+	for (const [freq, detune] of [
+		[55, 0],
+		[55, 8],
+		[110, -5]
+	]) {
+		const o = c.createOscillator();
+		o.type = 'sawtooth';
+		o.frequency.setValueAtTime(freq, t0);
+		o.detune.setValueAtTime(detune, t0);
+		o.connect(f);
+		o.start(t0);
+		o.stop(t0 + dur + 0.05);
+	}
+}
+
 /** Fire a feedback cue. Safe to call anywhere — silently no-ops without audio. */
 export function playSfx(name: SfxName): void {
 	const c = context();
@@ -111,6 +148,13 @@ export function playSfx(name: SfxName): void {
 		case 'map': // sonar-ish downward ping: the deck plan toggled
 			tone(c, { freq: 1175, to: 588, dur: 0.28, type: 'sine', vol: 0.18 });
 			break;
+		case 'scan': {
+			// Radar ping: a clean sine that slides down and rings out, with a quieter
+			// delayed echo for the sweeping-dish feel. Fired once per scanned thing.
+			tone(c, { freq: 1320, to: 760, dur: 0.34, type: 'sine', vol: 0.15 });
+			tone(c, { at: 0.16, freq: 1320, to: 760, dur: 0.3, type: 'sine', vol: 0.05 });
+			break;
+		}
 		case 'door': // full airlock cycle: bolt thunk → hiss → servo sweep → seated blip
 			tone(c, { freq: 120, to: 45, dur: 0.22, vol: 0.22 });
 			noise(c, { at: 0.08, dur: 0.7, from: 2200, to: 120, vol: 0.09 });

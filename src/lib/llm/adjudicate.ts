@@ -37,6 +37,9 @@ const TRANSFORM_OUTCOME_PREFIX = 'transform:';
 export const NEUTRAL_OUTCOME_ID = '__none__';
 // No effects — the client reacts to this id by opening the deck-plan overlay.
 export const MAP_OUTCOME_ID = '__map__';
+// No effects — the client reacts by running the scanner sweep + beeps; the
+// model's reply hints at one interactable thing in the room.
+export const SCAN_OUTCOME_ID = '__scan__';
 
 /** True for a synthesized "take the player through an exit" outcome. */
 export function isExitOutcomeId(id: string): boolean {
@@ -63,11 +66,12 @@ export function isTransformOutcomeId(id: string): boolean {
 	return id.startsWith(TRANSFORM_OUTCOME_PREFIX);
 }
 
-/** Synthesized outcomes (neutral/map/exits/grants/unlocks/consumes/transforms) never carry behaviour-level effects. */
+/** Synthesized outcomes (neutral/map/scan/exits/grants/unlocks/consumes/transforms) never carry behaviour-level effects. */
 export function isSyntheticOutcomeId(id: string): boolean {
 	return (
 		id === NEUTRAL_OUTCOME_ID ||
 		id === MAP_OUTCOME_ID ||
+		id === SCAN_OUTCOME_ID ||
 		isExitOutcomeId(id) ||
 		isGrantOutcomeId(id) ||
 		isUnlockOutcomeId(id) ||
@@ -112,6 +116,17 @@ export function withSyntheticOutcomes(
 			effects: []
 		});
 		ids.add(MAP_OUTCOME_ID);
+	}
+	if (!ids.has(SCAN_OUTCOME_ID)) {
+		extra.push({
+			id: SCAN_OUTCOME_ID,
+			label:
+				'Run the room scanner (when the player asks to scan/sweep the area) — sweeps their screen ' +
+				'and beeps; your reply should hint at ONE thing here worth investigating',
+			granted: true,
+			effects: []
+		});
+		ids.add(SCAN_OUTCOME_ID);
 	}
 	for (const e of exits) {
 		const id = `${EXIT_OUTCOME_PREFIX}${e.toSceneId}`;
