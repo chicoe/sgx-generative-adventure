@@ -745,17 +745,33 @@
 	// --- cheat codes -----------------------------------------------------------
 	// Operator commands typed straight into the composer, intercepted BEFORE the
 	// LLM — the computer never sees them and they leave no trace in its history.
-	//   sgx restart        → restart the whole experience (works even while the
-	//                        computer is busy — the unstick button)
-	//   sgx next room      → force a move through the first open door
-	//   sgx rooms          → list every room ("here" marks the current one)
-	//   sgx go to <room>   → teleport to a room by name (ignores doors & locks)
-	//   sgx items          → list the items present in this room
-	//   sgx get <item>     → grant an item by name
+	//   sgx restart         → restart the whole experience (works even while the
+	//                         computer is busy — the unstick button)
+	//   sgx next room       → force a move through a RANDOM open door
+	//   sgx rooms           → list the rooms connected here, numbered
+	//   sgx go to <room|#>  → teleport to a room by name, or by its number from
+	//                         "sgx rooms" (ignores doors & locks)
+	//   sgx items           → list the items present in this room
+	//   sgx get <item>      → grant an item by name
 	// Extend by adding cases below.
 	const matchByName = <T extends { id: string; name?: string }>(list: T[], q: string) =>
 		list.find((x) => x.id.toLowerCase() === q || (x.name ?? '').toLowerCase() === q) ??
 		list.find((x) => (x.name ?? '').toLowerCase().includes(q) || x.id.toLowerCase().includes(q));
+
+	// Rooms reachable from here (deduped, in door order) — shared by "sgx rooms"
+	// and "sgx go to <number>" so the printed numbers line up with the targets.
+	function connectedRooms() {
+		const out: { sceneId: string; name: string; locked: boolean }[] = [];
+		for (const d of availableDoors(build.scenes, scene, game)) {
+			if (d.toSceneId === scene.id || out.some((r) => r.sceneId === d.toSceneId)) continue;
+			out.push({
+				sceneId: d.toSceneId,
+				name: findScene(build.scenes, d.toSceneId)?.name || d.toSceneId,
+				locked: d.locked
+			});
+		}
+		return out;
+	}
 
 	// A forced transition: real engine move + the same bookkeeping as a normal one
 	// (movement STATE UPDATE, door sound, fresh greeting) so the computer keeps up.
@@ -788,15 +804,15 @@
 		}
 
 		if (cmd === 'sgx rooms') {
-			// Only the rooms connected to this one (🔒 marks a sealed door).
-			const doors = availableDoors(build.scenes, scene, game).map(
-				(d) =>
-					`${findScene(build.scenes, d.toSceneId)?.name || d.toSceneId}${d.locked ? ' 🔒' : ''}`
-			);
+			// Connected rooms, numbered (🔒 marks a sealed door). The numbers feed
+			// "sgx go to <n>".
+			const rooms = connectedRooms();
 			push(
 				'system',
-				doors.length
-					? `[ rooms connected to ${scene.name || scene.id}: ${doors.join(' · ')} ]`
+				rooms.length
+					? `[ rooms connected to ${scene.name || scene.id}: ${rooms
+							.map((r, i) => `${i + 1}. ${r.name}${r.locked ? ' 🔒' : ''}`)
+							.join(' · ')} ]`
 					: '[ no rooms connect to this one ]'
 			);
 			return true;
@@ -823,11 +839,13 @@
 		}
 
 		if (cmd === 'sgx next room') {
-			const door = availableDoors(build.scenes, scene, game).find((d) => !d.locked);
-			if (!door) {
+			// Pick a RANDOM open door (not always the first).
+			const open = availableDoors(build.scenes, scene, game).filter((d) => !d.locked);
+			if (!open.length) {
 				push('system', '[ override failed — no open route from here ]');
 				return true;
 			}
+			const door = open[Math.floor(Math.random() * open.length)];
 			push('system', `[ override accepted — forcing route: ${door.label} ]`);
 			await cheatMoveTo(door.toSceneId);
 			return true;
@@ -835,7 +853,19 @@
 
 		if (cmd.startsWith('sgx go to ')) {
 			const q = cmd.slice('sgx go to '.length).trim();
-			const dest = matchByName(build.scenes, q);
+			// A bare number refers to the "sgx rooms" list (connected rooms); anything
+			// else is matched by room name/id (teleports anywhere).
+			let dest: { id: string; name?: string } | undefined;
+			if (/^\d+$/.test(q)) {
+				const r = connectedRooms()[Number(q) - 1];
+				if (!r) {
+					push('system', `[ no room #${q} here — try "sgx rooms" ]`);
+					return true;
+				}
+				dest = { id: r.sceneId, name: r.name };
+			} else {
+				dest = matchByName(build.scenes, q);
+			}
 			if (!dest) {
 				push('system', `[ no room matches "${q}" — try "sgx rooms" ]`);
 			} else if (dest.id === game.currentSceneId) {
