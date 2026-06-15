@@ -1409,7 +1409,11 @@
 							{#if endingText}
 								<div class="ending-credits">
 									<div class="ending-roll" style:animation-duration={`${ENDING_CINEMA_MS}ms`}>
-										{endingText}
+										{#each endingText.split('\n') as line, i (i)}
+											<div class="credit-line">
+												{#if line.trim()}<span class="credit-text">{line}</span>{/if}
+											</div>
+										{/each}
 									</div>
 								</div>
 							{/if}
@@ -1927,13 +1931,16 @@
 		top: 0;
 		min-height: 100%;
 		text-align: center;
-		white-space: pre-wrap;
 		font-size: 1.4rem;
 		line-height: 1.8;
 		color: var(--ink);
 		text-shadow: var(--glow);
 		animation: credits-roll linear both;
 		will-change: transform;
+	}
+	/* One block per authored line; blank lines keep their gap but show no box. */
+	.credit-line {
+		min-height: 1.8em;
 	}
 	@keyframes credits-roll {
 		from {
@@ -1942,6 +1949,15 @@
 		to {
 			transform: translateY(-100%);
 		}
+	}
+	/* A dark box hugging the words (per line, via box-decoration-break) so the
+	   credits stay readable over busy scene art. */
+	.credit-text {
+		background: rgba(0, 0, 0, 0.68);
+		-webkit-box-decoration-break: clone;
+		box-decoration-break: clone;
+		padding: 0.06em 0.4em;
+		border-radius: 2px;
 	}
 	.mid {
 		position: relative;
