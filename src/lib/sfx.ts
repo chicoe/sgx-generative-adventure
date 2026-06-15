@@ -5,7 +5,16 @@
 // first cue, which always follows a key press, so autoplay policy is satisfied
 // (the kiosk lifts it entirely via --autoplay-policy=no-user-gesture-required).
 
-export type SfxName = 'send' | 'receive' | 'use' | 'get' | 'map' | 'door' | 'unlock' | 'scan';
+export type SfxName =
+	| 'send'
+	| 'receive'
+	| 'use'
+	| 'get'
+	| 'map'
+	| 'door'
+	| 'unlock'
+	| 'scan'
+	| 'tvoff';
 
 let ctx: AudioContext | null = null;
 
@@ -153,6 +162,14 @@ export function playSfx(name: SfxName): void {
 			// delayed echo for the sweeping-dish feel. Fired once per scanned thing.
 			tone(c, { freq: 1320, to: 760, dur: 0.34, type: 'sine', vol: 0.15 });
 			tone(c, { at: 0.16, freq: 1320, to: 760, dur: 0.3, type: 'sine', vol: 0.05 });
+			break;
+		}
+		case 'tvoff': {
+			// CRT power-down: a static snap, a high flyback whine dropping away, and
+			// a soft low thunk as the picture collapses to a line.
+			noise(c, { at: 0, dur: 0.1, from: 7000, to: 500, vol: 0.13 });
+			tone(c, { freq: 1700, to: 60, dur: 0.5, type: 'sine', vol: 0.16 });
+			tone(c, { at: 0.02, freq: 72, dur: 0.18, type: 'triangle', vol: 0.13 });
 			break;
 		}
 		case 'door': // full airlock cycle: bolt thunk → hiss → servo sweep → seated blip

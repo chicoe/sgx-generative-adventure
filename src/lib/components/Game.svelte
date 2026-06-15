@@ -411,7 +411,51 @@
 		Math.max(0, VITALS_START * (1 - (clockNow - vitalsStartedAt) / VITALS_DRAIN_MS))
 	);
 
+	// Ending cinematic: an ending scene plays full-screen (only its art, drifting
+	// with parallax) while its intro text scrolls like credits, then a CRT
+	// power-off, then back to the "press any key to start" screen.
 	let atEnding = $state(false);
+	let endingPhase = $state<'cinema' | 'tvoff' | 'wait' | null>(null);
+	let endTimers: ReturnType<typeof setTimeout>[] = [];
+	// ── Ending tunables ────────────────────────────────────────────────────
+	// How long the full-screen scene holds while the credits scroll, in seconds.
+	// Bump this to make the credits slower / the ending screen linger longer.
+	const ENDING_CREDITS_SECONDS = 15;
+	const ENDING_CINEMA_MS = ENDING_CREDITS_SECONDS * 1000;
+	const ENDING_TVOFF_MS = 700; // the dramatic power-off collapse
+	const ENDING_AMP = 80; // parallax shift (px) for the ending pan — more depth
+	let endCinemaStart = 0; // timestamp the credits/pan began (drives the slow pan)
+
+	function clearEndTimers() {
+		endTimers.forEach(clearTimeout);
+		endTimers = [];
+	}
+	function enterTvOff() {
+		endingPhase = 'tvoff';
+		playSfx('tvoff'); // the screen-shutting-down sound
+	}
+	function beginEnding() {
+		clearEndTimers();
+		atEnding = true;
+		endingPhase = 'cinema';
+		endCinemaStart = Date.now();
+		endTimers = [
+			setTimeout(enterTvOff, ENDING_CINEMA_MS),
+			setTimeout(finishEnding, ENDING_CINEMA_MS + ENDING_TVOFF_MS)
+		];
+	}
+	function finishEnding() {
+		clearEndTimers();
+		// Stay in the ending overlay (so the CRT applies) and slowly fade up the
+		// "press any key to start" prompt; a key then starts the next cycle.
+		endingPhase = 'wait';
+	}
+	function skipEnding() {
+		// Jump straight to the power-off (so a tester needn't watch all 10s).
+		clearEndTimers();
+		enterTvOff();
+		endTimers = [setTimeout(finishEnding, ENDING_TVOFF_MS)];
+	}
 
 	// The computer the terminal is talking to (the current scene's), plus that
 	// conversation's history for the LLM.
@@ -721,14 +765,13 @@
 		}
 	}
 
-	// After entering a scene: an ending plays the OUTRO gif (which freezes on its
-	// last frame until any key starts the next cycle); otherwise the computer
-	// greets.
+	// After entering a scene: an ending scene plays the full-screen ending
+	// cinematic (art + credits → CRT power-off → press-any-key); otherwise the
+	// computer greets.
 	async function afterEnter() {
 		const s = findScene(build.scenes, game.currentSceneId);
 		if (s?.ending) {
-			atEnding = true;
-			startSplash('outro');
+			beginEnding();
 		} else {
 			atEnding = false;
 			await requestOpening();
@@ -736,7 +779,9 @@
 	}
 
 	async function restart() {
+		clearEndTimers();
 		atEnding = false;
+		endingPhase = null;
 		initFrom(build); // picks a fresh random start, resets transcript + state
 		startSplash('boot'); // a new cycle always opens with the BOOT gif
 		beginIntro(); // …then the next player answers the questionnaire again
@@ -1092,10 +1137,12 @@
 			skipSplash();
 			return;
 		}
-		// At the outro's frozen last frame, ANY key starts the next cycle.
+		// Ending: a key skips the credits to the power-off; on the "press any key"
+		// screen it starts the next cycle.
 		if (atEnding) {
 			e.preventDefault();
-			void restart();
+			if (endingPhase === 'cinema') skipEnding();
+			else if (endingPhase === 'wait') void restart();
 			return;
 		}
 		if (introActive) {
@@ -1259,11 +1306,19 @@
 		let t = 0;
 		const tick = () => {
 			t += 1 / 60;
-			const swayX = Math.sin(t * 0.6) * 0.12;
-			const swayY = Math.cos(t * 0.45) * 0.08;
-			const tx = clamp(target.x + swayX, -1, 1);
-			const ty = clamp(target.y + swayY, -1, 1);
-			look = { x: look.x + (tx - look.x) * 0.08, y: look.y + (ty - look.y) * 0.08 };
+			if (atEnding && endingPhase === 'cinema') {
+				// Slow cinematic pan across the scene (full range → one side to the
+				// other) so the parallax layers separate and read as depth.
+				const f = clamp((Date.now() - endCinemaStart) / ENDING_CINEMA_MS, 0, 1);
+				const px = (0.5 - f) * 1.8;
+				look = { x: look.x + (px - look.x) * 0.05, y: look.y * 0.94 };
+			} else {
+				const swayX = Math.sin(t * 0.6) * 0.12;
+				const swayY = Math.cos(t * 0.45) * 0.08;
+				const tx = clamp(target.x + swayX, -1, 1);
+				const ty = clamp(target.y + swayY, -1, 1);
+				look = { x: look.x + (tx - look.x) * 0.08, y: look.y + (ty - look.y) * 0.08 };
+			}
 			raf = requestAnimationFrame(tick);
 		};
 		raf = requestAnimationFrame(tick);
@@ -1272,6 +1327,7 @@
 			clearInterval(clockId);
 			splashTimers.forEach(clearTimeout);
 			scanTimers.forEach(clearTimeout);
+			endTimers.forEach(clearTimeout);
 			unsubLive?.();
 		};
 	});
@@ -1322,50 +1378,21 @@
 			</filter>
 		</svg>
 		<div class="frame" style={frameStyle}>
-			<div class="content" class:duo={display.mode !== 'full'}>
-				<header class="statusbar">
-					<div class="grp">
-						<span class="sys">ARG-OS</span>
-						<span class="sep">·</span>
-						{#if buildSource === 'firestore'}
-							<span class="bld" title="content build (builds/build-{build.meta.version})"
-								>BLD {build.meta.version}</span
-							>
-						{:else}
-							<span class="bld" class:draft={buildSource === 'draft'}
-								>{buildSource === 'draft' ? 'DRAFT' : 'PLACEHOLDER'}</span
-							>
-						{/if}
-						<span class="sep">·</span>
-						<span class="clock">{alienTime}</span>
-					</div>
-					<div class="grp center">
-						<span class="lbl">LOC</span>
-						<span class="room">{scene.name}</span>
-					</div>
-					<div class="grp right">
-						<span class="status">⚠ CRITICAL</span>
-						<span class="vitals" class:low={vitalsPct <= 25}>
-							VITALS {vitalsPct <= 0 ? 'ERROR' : `${Math.round(vitalsPct)}%`}
-						</span>
-						<span
-							class="led {buildSource}"
-							title={buildSource === 'firestore'
-								? 'Live build (Firestore)'
-								: buildSource === 'draft'
-									? 'Draft — unpublished'
-									: 'Placeholder build'}
-						></span>
-					</div>
-				</header>
-
-				<div class="mid">
-					<div class="stage">
-						{#key game.currentSceneId}
-							{@const snap = findScene(build.scenes, game.currentSceneId)!}
-							<div class="scene-holder" in:fade={{ duration: 450 }} out:fade={{ duration: 300 }}>
-								{#if sceneHasArt(snap)}
-									<SceneRenderer scene={snap} {look} picks={artPicks} />
+			{#if atEnding}
+				{@const endScene = findScene(build.scenes, game.currentSceneId)}
+				<!-- Ending cinematic: full-screen scene art (drifting with parallax) +
+				     credits scroll, then a CRT power-off. Same duotone filter as the
+				     normal content so the art stays on-palette. -->
+				<div class="endwrap" class:duo={display.mode !== 'full'}>
+					{#if endingPhase === 'wait'}
+						<!-- After the power-off: the screen slowly fades back to the
+						     "press any key" prompt (in-frame, so the CRT overlay applies). -->
+						<div class="ending-wait"><span>press any key to start</span></div>
+					{:else}
+						<div class="ending-scene" class:tvoff={endingPhase === 'tvoff'}>
+							<div class="ending-art" style:animation-duration={`${ENDING_CINEMA_MS}ms`}>
+								{#if endScene && sceneHasArt(endScene)}
+									<SceneRenderer scene={endScene} {look} picks={artPicks} amp={ENDING_AMP} />
 								{:else}
 									<div class="nosignal" aria-label="no signal">
 										<div class="static"></div>
@@ -1373,225 +1400,288 @@
 									</div>
 								{/if}
 							</div>
-						{/key}
-						{#if scanning}
-							<div
-								class="scangrid"
-								aria-hidden="true"
-								style:grid-template-columns={`repeat(${SCAN_COLS}, 1fr)`}
-								style:grid-template-rows={`repeat(${SCAN_ROWS}, 1fr)`}
-							>
-								{#each Array.from({ length: SCAN_CELLS }) as _cell, i (i)}
-									<div class="scancell" class:active={i === scanCell}></div>
-								{/each}
-							</div>
-						{/if}
-					</div>
-
-					<div class="hud">
-						<div class="inventory" aria-label="inventory">
-							{#each Array.from({ length: 9 }) as _slot, idx (idx)}
-								{@const item = inventoryItems[idx]}
-								<button
-									type="button"
-									class="slot"
-									class:filled={!!item}
-									tabindex="-1"
-									disabled={!item || pending}
-									onclick={() => item && useItem(item)}
-									title={item ? `Use ${item.name} (press ${idx + 1})` : `slot ${idx + 1}`}
-								>
-									<span class="key">{idx + 1}</span>
-									{#if item}
-										{#if imgUrl(item.iconPath)}
-											<img src={imgUrl(item.iconPath)} alt={item.name} />
-										{:else}
-											<span class="nm">{item.name}</span>
-										{/if}
-									{/if}
-								</button>
-							{/each}
-						</div>
-
-						<!-- Always present: collapsed = just the title bar, so players know it's there. -->
-						<div class="map" aria-label="deck plan">
-							<div class="map-title">DECK PLAN · [0]</div>
-							{#if mapOpen}
-								<svg class="map-svg" viewBox="0 0 220 140" preserveAspectRatio="xMidYMid meet">
-									<!-- corridors first, under the room boxes -->
-									{#each mapNodes as n (n.id)}
-										<line class="ml" class:locked={n.locked} x1="110" y1="66" x2={n.x} y2={n.y} />
-									{/each}
-									{#each mapNodes as n (n.id)}
-										<rect
-											class="mr"
-											class:unknown={!n.visited}
-											x={n.x - 16}
-											y={n.y - 10}
-											width="32"
-											height="20"
-										/>
-										<text
-											class="mt"
-											class:unknown={!n.visited}
-											x={n.x}
-											y={n.y + n.labelDy}
-											text-anchor="middle">{shortName(n.label, 10)}</text
-										>
-										{#if n.locked}
-											<!-- padlock badge, centred in the room box -->
-											<g class="mlock" transform="translate({n.x - 6}, {n.y - 7.2}) scale(1.5)">
-												<path d="M2 4 V2.5 A2 2 0 0 1 6 2.5 V4" />
-												<rect x="0.8" y="4" width="6.4" height="5" />
-											</g>
-										{/if}
-									{/each}
-									<!-- current room: big, outline only, name inside -->
-									<rect class="mcur" x="68" y="41" width="84" height="50" />
-									<text class="mt cur" x="110" y="70" text-anchor="middle"
-										>{shortName(scene.name, 12)}</text
-									>
-									{#if itemsHere}
-										<circle class="map-hint" cx="146" cy="46" r="3.5">
-											<title>sensors detect loose items here</title>
-										</circle>
-									{/if}
-									{#if !mapNodes.length}
-										<text class="mt unknown" x="110" y="108" text-anchor="middle"
-											>no routes detected</text
-										>
-									{/if}
-								</svg>
+							{#if endScene?.introText}
+								<div class="ending-credits">
+									<div class="ending-roll" style:animation-duration={`${ENDING_CINEMA_MS}ms`}>
+										{endScene.introText}
+									</div>
+								</div>
 							{/if}
 						</div>
-					</div>
+					{/if}
 				</div>
-
-				<section class="terminal withscroll">
-					<div class="transcript" bind:this={transcriptEl} onscroll={syncScroll}>
-						{#each lines as line (line.id)}
-							<p
-								class={line.who}
-								class:latest={line.who === 'computer' && line.id === lastComputerId}
-							>
-								{#if line.who === 'player'}<span class="who">&gt;</span>{/if}{line.text.slice(
-									0,
-									line.revealed
-								)}
-							</p>
-						{/each}
-						{#if pending}<p class="spinner">{spinner}</p>{/if}
-					</div>
-
-					<form
-						class="composer"
-						onsubmit={(e) => {
-							e.preventDefault();
-							sendMessage();
-						}}
-					>
-						<span class="prompt">&gt;</span>
-						<input
-							use:autofocus
-							bind:this={inputEl}
-							placeholder="type to the computer…"
-							bind:value={inputText}
-							onkeydown={onComposerKey}
-							onblur={refocus}
-						/>
-					</form>
-
-					<!-- Old-OS scrollbar: ▲ on top, ▼ on bottom, draggable thumb between
-					     (mirrors the Up/Down keys). tabindex -1 + mousedown-prevent so
-					     clicking never steals the composer focus. -->
-					<div class="scrollbar" aria-hidden="true">
-						<button
-							type="button"
-							class="sb-arrow"
-							tabindex="-1"
-							onmousedown={(e) => e.preventDefault()}
-							onclick={() => scrollTranscript(-1)}
-							title="scroll up (↑)">▲</button
-						>
-						<!-- svelte-ignore a11y_no_static_element_interactions -->
-						<div
-							class="sb-track"
-							bind:this={sbTrackEl}
-							onpointerdown={onTrackDown}
-							onmousedown={(e) => e.preventDefault()}
-						>
-							<!-- svelte-ignore a11y_no_static_element_interactions -->
-							<div
-								class="sb-thumb"
-								style:top={`${sbThumbTopPct * 100}%`}
-								style:height={`${sbThumbPct * 100}%`}
-								onpointerdown={onThumbDown}
-							></div>
+			{:else}
+				<div class="content" class:duo={display.mode !== 'full'}>
+					<header class="statusbar">
+						<div class="grp">
+							<span class="sys">ARG-OS</span>
+							<span class="sep">·</span>
+							{#if buildSource === 'firestore'}
+								<span class="bld" title="content build (builds/build-{build.meta.version})"
+									>BLD {build.meta.version}</span
+								>
+							{:else}
+								<span class="bld" class:draft={buildSource === 'draft'}
+									>{buildSource === 'draft' ? 'DRAFT' : 'PLACEHOLDER'}</span
+								>
+							{/if}
+							<span class="sep">·</span>
+							<span class="clock">{alienTime}</span>
 						</div>
-						<button
-							type="button"
-							class="sb-arrow"
-							tabindex="-1"
-							onmousedown={(e) => e.preventDefault()}
-							onclick={() => scrollTranscript(1)}
-							title="scroll down (↓)">▼</button
-						>
-					</div>
-				</section>
+						<div class="grp center">
+							<span class="lbl">LOC</span>
+							<span class="room">{scene.name}</span>
+						</div>
+						<div class="grp right">
+							<span class="status">⚠ CRITICAL</span>
+							<span class="vitals" class:low={vitalsPct <= 25}>
+								VITALS {vitalsPct <= 0 ? 'ERROR' : `${Math.round(vitalsPct)}%`}
+							</span>
+							<span
+								class="led {buildSource}"
+								title={buildSource === 'firestore'
+									? 'Live build (Firestore)'
+									: buildSource === 'draft'
+										? 'Draft — unpublished'
+										: 'Placeholder build'}
+							></span>
+						</div>
+					</header>
 
-				{#if introActive}
-					{@const q = INTRO_QUESTIONS[introStep]}
-					<!-- Opaque, non-fading shield: the game underneath must never show
-					     through while the interview (or the splash above it) fades. -->
-					<div
-						class="introshield"
-						style:background={display.mode === 'full' ? display.bg : '#000000'}
-					></div>
-					<!-- Intake questionnaire: the SAME chatbox, just larger — a .terminal
-					     spanning the window from bottom to top (geometry overridden, every
-					     other style shared); questions type out, history scrolls up. -->
-					<section class="terminal intro" in:fade={{ duration: 400 }}>
-						<div class="transcript" bind:this={introScrollEl}>
-							{#each introLines as line (line.id)}
-								<p class={line.who} class:latest={line.id === introQuestionLineId}>
+					<div class="mid">
+						<div class="stage">
+							{#key game.currentSceneId}
+								{@const snap = findScene(build.scenes, game.currentSceneId)!}
+								<div class="scene-holder" in:fade={{ duration: 450 }} out:fade={{ duration: 300 }}>
+									{#if sceneHasArt(snap)}
+										<SceneRenderer scene={snap} {look} picks={artPicks} />
+									{:else}
+										<div class="nosignal" aria-label="no signal">
+											<div class="static"></div>
+											<span class="nosignal-text">NO SIGNAL</span>
+										</div>
+									{/if}
+								</div>
+							{/key}
+							{#if scanning}
+								<div
+									class="scangrid"
+									aria-hidden="true"
+									style:grid-template-columns={`repeat(${SCAN_COLS}, 1fr)`}
+									style:grid-template-rows={`repeat(${SCAN_ROWS}, 1fr)`}
+								>
+									{#each Array.from({ length: SCAN_CELLS }) as _cell, i (i)}
+										<div class="scancell" class:active={i === scanCell}></div>
+									{/each}
+								</div>
+							{/if}
+						</div>
+
+						<div class="hud">
+							<div class="inventory" aria-label="inventory">
+								{#each Array.from({ length: 9 }) as _slot, idx (idx)}
+									{@const item = inventoryItems[idx]}
+									<button
+										type="button"
+										class="slot"
+										class:filled={!!item}
+										tabindex="-1"
+										disabled={!item || pending}
+										onclick={() => item && useItem(item)}
+										title={item ? `Use ${item.name} (press ${idx + 1})` : `slot ${idx + 1}`}
+									>
+										<span class="key">{idx + 1}</span>
+										{#if item}
+											{#if imgUrl(item.iconPath)}
+												<img src={imgUrl(item.iconPath)} alt={item.name} />
+											{:else}
+												<span class="nm">{item.name}</span>
+											{/if}
+										{/if}
+									</button>
+								{/each}
+							</div>
+
+							<!-- Always present: collapsed = just the title bar, so players know it's there. -->
+							<div class="map" aria-label="deck plan">
+								<div class="map-title">DECK PLAN · [0]</div>
+								{#if mapOpen}
+									<svg class="map-svg" viewBox="0 0 220 140" preserveAspectRatio="xMidYMid meet">
+										<!-- corridors first, under the room boxes -->
+										{#each mapNodes as n (n.id)}
+											<line class="ml" class:locked={n.locked} x1="110" y1="66" x2={n.x} y2={n.y} />
+										{/each}
+										{#each mapNodes as n (n.id)}
+											<rect
+												class="mr"
+												class:unknown={!n.visited}
+												x={n.x - 16}
+												y={n.y - 10}
+												width="32"
+												height="20"
+											/>
+											<text
+												class="mt"
+												class:unknown={!n.visited}
+												x={n.x}
+												y={n.y + n.labelDy}
+												text-anchor="middle">{shortName(n.label, 10)}</text
+											>
+											{#if n.locked}
+												<!-- padlock badge, centred in the room box -->
+												<g class="mlock" transform="translate({n.x - 6}, {n.y - 7.2}) scale(1.5)">
+													<path d="M2 4 V2.5 A2 2 0 0 1 6 2.5 V4" />
+													<rect x="0.8" y="4" width="6.4" height="5" />
+												</g>
+											{/if}
+										{/each}
+										<!-- current room: big, outline only, name inside -->
+										<rect class="mcur" x="68" y="41" width="84" height="50" />
+										<text class="mt cur" x="110" y="70" text-anchor="middle"
+											>{shortName(scene.name, 12)}</text
+										>
+										{#if itemsHere}
+											<circle class="map-hint" cx="146" cy="46" r="3.5">
+												<title>sensors detect loose items here</title>
+											</circle>
+										{/if}
+										{#if !mapNodes.length}
+											<text class="mt unknown" x="110" y="108" text-anchor="middle"
+												>no routes detected</text
+											>
+										{/if}
+									</svg>
+								{/if}
+							</div>
+						</div>
+					</div>
+
+					<section class="terminal withscroll">
+						<div class="transcript" bind:this={transcriptEl} onscroll={syncScroll}>
+							{#each lines as line (line.id)}
+								<p
+									class={line.who}
+									class:latest={line.who === 'computer' && line.id === lastComputerId}
+								>
 									{#if line.who === 'player'}<span class="who">&gt;</span>{/if}{line.text.slice(
 										0,
 										line.revealed
 									)}
 								</p>
 							{/each}
+							{#if pending}<p class="spinner">{spinner}</p>{/if}
 						</div>
-						<form class="composer" onsubmit={(e) => e.preventDefault()}>
+
+						<form
+							class="composer"
+							onsubmit={(e) => {
+								e.preventDefault();
+								sendMessage();
+							}}
+						>
 							<span class="prompt">&gt;</span>
 							<input
-								bind:this={introInputEl}
-								bind:value={introAnswer}
 								use:autofocus
-								onblur={() =>
-									setTimeout(() => {
-										if (introActive) introInputEl?.focus();
-									}, 0)}
-								autocomplete="off"
-								spellcheck="false"
-								placeholder={q.kind === 'text' ? 'type your answer…' : 'press a key, 1 to 9…'}
+								bind:this={inputEl}
+								placeholder="type to the computer…"
+								bind:value={inputText}
+								onkeydown={onComposerKey}
+								onblur={refocus}
 							/>
 						</form>
+
+						<!-- Old-OS scrollbar: ▲ on top, ▼ on bottom, draggable thumb between
+					     (mirrors the Up/Down keys). tabindex -1 + mousedown-prevent so
+					     clicking never steals the composer focus. -->
+						<div class="scrollbar" aria-hidden="true">
+							<button
+								type="button"
+								class="sb-arrow"
+								tabindex="-1"
+								onmousedown={(e) => e.preventDefault()}
+								onclick={() => scrollTranscript(-1)}
+								title="scroll up (↑)">▲</button
+							>
+							<!-- svelte-ignore a11y_no_static_element_interactions -->
+							<div
+								class="sb-track"
+								bind:this={sbTrackEl}
+								onpointerdown={onTrackDown}
+								onmousedown={(e) => e.preventDefault()}
+							>
+								<!-- svelte-ignore a11y_no_static_element_interactions -->
+								<div
+									class="sb-thumb"
+									style:top={`${sbThumbTopPct * 100}%`}
+									style:height={`${sbThumbPct * 100}%`}
+									onpointerdown={onThumbDown}
+								></div>
+							</div>
+							<button
+								type="button"
+								class="sb-arrow"
+								tabindex="-1"
+								onmousedown={(e) => e.preventDefault()}
+								onclick={() => scrollTranscript(1)}
+								title="scroll down (↓)">▼</button
+							>
+						</div>
 					</section>
-				{/if}
-				{#if introFading}
-					<!-- The bridge between the form and the game: fades in to the
+
+					{#if introActive}
+						{@const q = INTRO_QUESTIONS[introStep]}
+						<!-- Opaque, non-fading shield: the game underneath must never show
+					     through while the interview (or the splash above it) fades. -->
+						<div
+							class="introshield"
+							style:background={display.mode === 'full' ? display.bg : '#000000'}
+						></div>
+						<!-- Intake questionnaire: the SAME chatbox, just larger — a .terminal
+					     spanning the window from bottom to top (geometry overridden, every
+					     other style shared); questions type out, history scrolls up. -->
+						<section class="terminal intro" in:fade={{ duration: 400 }}>
+							<div class="transcript" bind:this={introScrollEl}>
+								{#each introLines as line (line.id)}
+									<p class={line.who} class:latest={line.id === introQuestionLineId}>
+										{#if line.who === 'player'}<span class="who">&gt;</span>{/if}{line.text.slice(
+											0,
+											line.revealed
+										)}
+									</p>
+								{/each}
+							</div>
+							<form class="composer" onsubmit={(e) => e.preventDefault()}>
+								<span class="prompt">&gt;</span>
+								<input
+									bind:this={introInputEl}
+									bind:value={introAnswer}
+									use:autofocus
+									onblur={() =>
+										setTimeout(() => {
+											if (introActive) introInputEl?.focus();
+										}, 0)}
+									autocomplete="off"
+									spellcheck="false"
+									placeholder={q.kind === 'text' ? 'type your answer…' : 'press a key, 1 to 9…'}
+								/>
+							</form>
+						</section>
+					{/if}
+					{#if introFading}
+						<!-- The bridge between the form and the game: fades in to the
 					     background colour, then fades away over the live screen. -->
-					<div
-						class="introfade"
-						style:background={display.mode === 'full' ? display.bg : '#000000'}
-						transition:fade={{ duration: INTRO_FADE_MS }}
-					></div>
-				{/if}
-			</div>
+						<div
+							class="introfade"
+							style:background={display.mode === 'full' ? display.bg : '#000000'}
+							transition:fade={{ duration: INTRO_FADE_MS }}
+						></div>
+					{/if}
+				</div>
+			{/if}
 			<div class="crt" aria-hidden="true" style:background={crtBg}></div>
 		</div>
 
-		{#if splashPhase !== 'done' || loading}
+		{#if needsKeyToStart || splashPhase !== 'done' || loading}
 			<!-- Hardcoded black (never the palette): covers the whole viewport from the
 			     very first SSR paint, so no colour can flash before the build loads.
 			     The current gif (boot / intro / outro) fills the same area the game
@@ -1718,6 +1808,134 @@
 		flex-direction: column;
 		/* no gap: header > scene > chatbox stack flush vertically */
 		padding: 12px;
+	}
+
+	/* Ending cinematic: fills the whole frame (no chrome). Carries the same
+	   duotone filter as .content so the art stays on-palette. */
+	.endwrap {
+		position: absolute;
+		inset: 0;
+		background: var(--bg);
+	}
+	.endwrap.duo {
+		background: #000;
+		filter: url(#sgx-duotone);
+	}
+	.ending-scene {
+		position: absolute;
+		inset: 0;
+		overflow: hidden;
+		transform-origin: center center;
+		/* Slow fade-in of the whole scene as the cinematic opens. */
+		animation: end-fadein 2.6s ease-out both;
+	}
+	/* Ken Burns: the art starts a touch more zoomed in and eases back over the
+	   cinema, adding motion on top of the parallax pan (which gives the depth). */
+	.ending-art {
+		position: absolute;
+		inset: 0;
+		transform-origin: 60% 50%;
+		animation: end-kenburns linear both;
+	}
+	@keyframes end-kenburns {
+		from {
+			transform: scale(1.18);
+		}
+		to {
+			transform: scale(1.04);
+		}
+	}
+	/* Post power-off: the "press any key" prompt fades back in very slowly. */
+	.ending-wait {
+		position: absolute;
+		inset: 0;
+		display: grid;
+		place-items: center;
+		animation: end-wait-fadein 3.5s ease-in both;
+	}
+	.ending-wait span {
+		font-family: var(--font-terminal);
+		font-size: 1rem;
+		letter-spacing: 0.2em;
+		color: var(--ink-dim);
+		text-shadow: var(--glow);
+		animation: blink 1.1s steps(1) infinite;
+	}
+	@keyframes end-wait-fadein {
+		0% {
+			opacity: 0;
+		}
+		40% {
+			opacity: 0;
+		}
+		100% {
+			opacity: 1;
+		}
+	}
+	@keyframes end-fadein {
+		from {
+			opacity: 0;
+		}
+		to {
+			opacity: 1;
+		}
+	}
+	/* CRT power-off: the picture closes VERTICALLY into a bright centre line,
+	   holds, then the line collapses to a centre dot and fades. */
+	.ending-scene.tvoff {
+		animation: tv-off 0.7s cubic-bezier(0.65, 0, 0.85, 1) forwards;
+	}
+	@keyframes tv-off {
+		0% {
+			transform: scale(1, 1);
+			filter: brightness(1);
+		}
+		48% {
+			transform: scale(1, 0.006);
+			filter: brightness(7);
+		}
+		62% {
+			transform: scale(1, 0.006);
+			filter: brightness(11);
+		}
+		100% {
+			transform: scale(0, 0.006);
+			filter: brightness(16);
+			opacity: 0;
+		}
+	}
+	/* Credits roll: the scene's intro text starts fully BELOW the screen and
+	   scrolls up and off over the cinema window. min-height fills the frame so the
+	   transform travel (own height) always carries the text the full distance. */
+	.ending-credits {
+		position: absolute;
+		inset: 0;
+		z-index: 10;
+		overflow: hidden;
+		pointer-events: none;
+	}
+	.ending-roll {
+		position: absolute;
+		left: 8%;
+		right: 8%;
+		top: 0;
+		min-height: 100%;
+		text-align: center;
+		white-space: pre-wrap;
+		font-size: 1.4rem;
+		line-height: 1.8;
+		color: var(--ink);
+		text-shadow: var(--glow);
+		animation: credits-roll linear both;
+		will-change: transform;
+	}
+	@keyframes credits-roll {
+		from {
+			transform: translateY(100%);
+		}
+		to {
+			transform: translateY(-100%);
+		}
 	}
 	.mid {
 		position: relative;

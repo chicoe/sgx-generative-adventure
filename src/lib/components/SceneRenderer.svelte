@@ -16,21 +16,24 @@
 		// Per-RUN variant choices keyed "sceneId/layerId" (rollLayerImages at game
 		// start) — so revisiting a room shows the same art all run. Without it
 		// (editor previews) the component rolls locally, stable per mount.
-		picks
+		picks,
+		// Max parallax shift in px at full look (×1) and full parallaxFactor. The
+		// ending cinematic passes a bigger value for a more pronounced pan.
+		amp = 42
 	}: {
 		scene: Scene;
 		look?: { x: number; y: number };
 		resolve?: (path: string) => string;
 		picks?: Record<string, string>;
+		amp?: number;
 	} = $props();
 
-	// Max parallax shift in px at full look (×1) and full parallaxFactor.
-	const AMP = 42;
+	const AMP = $derived(amp);
 	// Upscale headroom so a panning layer never reveals the backdrop at its edge.
-	// PROPORTIONAL to parallaxFactor: a static layer (factor 0) gets scale 1 — no
-	// upscale, so it stays pixel-crisp — and only moving layers pay the slight
-	// softness of a non-integer scale, in proportion to how far they actually pan.
-	const headroomScale = (parallaxFactor: number) => (1 + parallaxFactor * 0.14).toFixed(3);
+	// PROPORTIONAL to parallaxFactor AND amp (amp/300 = 0.14 at the default 42), so
+	// a static layer (factor 0) stays pixel-crisp and a bigger amp gets the extra
+	// headroom it needs.
+	const headroomScale = (parallaxFactor: number) => (1 + parallaxFactor * (AMP / 300)).toFixed(3);
 
 	// Which image a multi-image layer shows: the run-level pick when provided
 	// (same art all run), else a local pick — stable per mount, re-rolled only
