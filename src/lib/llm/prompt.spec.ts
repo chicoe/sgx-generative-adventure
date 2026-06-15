@@ -82,4 +82,16 @@ describe('buildPrompt', () => {
 		expect(systemInstruction).toContain('- Keycard — opens maintenance-level doors');
 		expect(systemInstruction).toContain('- Crowbar (item "crowbar") — pries sealed hatches');
 	});
+
+	it('numbers inventory items by their HUD slot so the player can say "item 2"', () => {
+		const { systemInstruction } = buildPrompt(behaviour, [], 'hi', {
+			name: 'Cryo Pod',
+			inventory: [
+				{ name: 'Keycard', slot: 1 },
+				{ name: 'Crowbar', slot: 2 }
+			]
+		});
+		expect(systemInstruction).toContain('- #1: Keycard');
+		expect(systemInstruction).toContain('- #2: Crowbar');
+	});
 });

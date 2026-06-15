@@ -19,8 +19,9 @@ export interface SceneContext {
 	lockedExits?: { label: string; requires: string[] }[]; // sealed, player lacks the items (info only)
 	unlockable?: { label: string; exitId: string }[]; // sealed, but the player carries what opens it
 	// Items carry their authored description — it holds the important information
-	// about what an item is and does. `consumable` marks one-use items.
-	inventory?: { name: string; description?: string; consumable?: boolean }[];
+	// about what an item is and does. `consumable` marks one-use items; `slot` is
+	// the 1-based number shown on the player's HUD (so they can say "item 2").
+	inventory?: { name: string; description?: string; consumable?: boolean; slot?: number }[];
 	giveable?: { label: string; itemId: string; description?: string }[]; // items the computer may hand over here
 	consumables?: { label: string; itemId: string }[]; // held one-use items the computer can spend
 	transformables?: { fromItemId: string; fromLabel: string; toLabel: string }[]; // held items that can become another
@@ -54,7 +55,7 @@ function sceneSection(scene: SceneContext): string {
 		? scene.inventory
 				.map(
 					(i) =>
-						`- ${i.name}${i.consumable ? ' (CONSUMABLE — one use)' : ''}${i.description ? ` — ${i.description}` : ''}`
+						`- ${i.slot != null ? `#${i.slot}: ` : ''}${i.name}${i.consumable ? ' (CONSUMABLE — one use)' : ''}${i.description ? ` — ${i.description}` : ''}`
 				)
 				.join('\n')
 		: '- (empty)';
@@ -84,7 +85,8 @@ function sceneSection(scene: SceneContext): string {
 		unlockable,
 		'ITEMS PRESENT HERE THAT YOU CAN GIVE THE PLAYER:',
 		giveable,
-		'PLAYER INVENTORY (what each item is and does):',
+		'PLAYER INVENTORY (the #number is the slot on the player’s screen — if they refer to "item 2"',
+		'or "number 3", that is the item with that #):',
 		inventory,
 		consumables
 			? 'CONSUMABLE ITEMS THE PLAYER HOLDS — using one up spends it (it leaves their inventory):'

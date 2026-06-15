@@ -58,7 +58,8 @@ const requestSchema = z.object({
 					z.object({
 						name: z.string(),
 						description: z.string().optional(),
-						consumable: z.boolean().optional()
+						consumable: z.boolean().optional(),
+						slot: z.number().optional() // 1-based HUD slot number
 					})
 				)
 				.optional(),

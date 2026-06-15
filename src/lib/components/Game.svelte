@@ -609,14 +609,17 @@
 				.filter((d) => d.locked && !d.canUnlock)
 				.map((d) => ({ label: d.label, requires: (d.requiredItems ?? []).map(itemName) })),
 			// Items carry their authored description — that's where their meaning lives.
-			inventory: state.inventory.map((id) => {
-				const it = build.items.find((i) => i.id === id);
-				return {
-					name: it?.name || id,
-					description: it?.description || undefined,
-					consumable: it?.consumable || undefined
-				};
-			}),
+			// `slot` is the 1-based number shown in the HUD (same filter/order), so the
+			// player can refer to "item number 2" and the computer knows which it is.
+			inventory: state.inventory
+				.map((id) => build.items.find((i) => i.id === id))
+				.filter((i): i is Item => !!i)
+				.map((it, idx) => ({
+					slot: idx + 1,
+					name: it.name || it.id,
+					description: it.description || undefined,
+					consumable: it.consumable || undefined
+				})),
 			// Only offer items present this run that the player doesn't already hold.
 			giveable: presentGiveables
 				.filter((id) => !owned.has(id))
