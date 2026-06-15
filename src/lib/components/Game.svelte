@@ -421,10 +421,10 @@
 	// ── Ending tunables ────────────────────────────────────────────────────
 	// How long the full-screen scene holds while the credits scroll, in seconds.
 	// Bump this to make the credits slower / the ending screen linger longer.
-	const ENDING_CREDITS_SECONDS = 15;
+	const ENDING_CREDITS_SECONDS = 25;
 	const ENDING_CINEMA_MS = ENDING_CREDITS_SECONDS * 1000;
 	const ENDING_TVOFF_MS = 700; // the dramatic power-off collapse
-	const ENDING_AMP = 80; // parallax shift (px) for the ending pan — more depth
+	const ENDING_AMP = 45; // parallax shift (px) for the ending pan (keep modest — bigger = more zoom)
 	let endCinemaStart = 0; // timestamp the credits/pan began (drives the slow pan)
 	// The credits text for THIS run — one variant, picked once when the ending
 	// starts (the scene's intro text may hold several, split by a "---" line).
@@ -1849,10 +1849,10 @@
 	}
 	@keyframes end-kenburns {
 		from {
-			transform: scale(1.18);
+			transform: scale(1.02);
 		}
 		to {
-			transform: scale(1.04);
+			transform: scale(1);
 		}
 	}
 	/* Post power-off: the "press any key" prompt fades back in very slowly. */
@@ -1926,11 +1926,11 @@
 	}
 	.ending-roll {
 		position: absolute;
-		left: 8%;
-		right: 8%;
+		left: 3%;
+		right: 50%;
 		top: 0;
 		min-height: 100%;
-		text-align: center;
+		text-align: left;
 		font-size: 1.4rem;
 		line-height: 1.8;
 		color: var(--ink);
