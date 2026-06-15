@@ -227,7 +227,8 @@
 			<label>name <input bind:value={current.name} /></label>
 		</div>
 		<label
-			>intro text (narration on enter)
+			>intro text (narration on enter; also the ending credits when this is an ending scene) — put a
+			line of <code>---</code> between variants to pick one at random
 			<textarea rows="2" bind:value={current.introText}></textarea>
 		</label>
 		<label

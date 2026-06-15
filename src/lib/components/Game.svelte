@@ -17,6 +17,7 @@
 	import { db } from '$lib/firebase/client';
 	import { MAP_OUTCOME_ID, SCAN_OUTCOME_ID } from '$lib/llm/adjudicate';
 	import { audioUnlocked, playSfx, playDrone } from '$lib/sfx';
+	import { pickTextVariant } from '$lib/text';
 	import { DEFAULT_DISPLAY, themeStyle, duotoneTable, crtBackground } from '$lib/theme';
 	import type { Build, ConversationTurn, Effect, GameState, Item, Scene } from '$lib/engine/types';
 
@@ -425,6 +426,9 @@
 	const ENDING_TVOFF_MS = 700; // the dramatic power-off collapse
 	const ENDING_AMP = 80; // parallax shift (px) for the ending pan — more depth
 	let endCinemaStart = 0; // timestamp the credits/pan began (drives the slow pan)
+	// The credits text for THIS run — one variant, picked once when the ending
+	// starts (the scene's intro text may hold several, split by a "---" line).
+	let endingText = $state('');
 
 	function clearEndTimers() {
 		endTimers.forEach(clearTimeout);
@@ -439,6 +443,7 @@
 		atEnding = true;
 		endingPhase = 'cinema';
 		endCinemaStart = Date.now();
+		endingText = pickTextVariant(findScene(build.scenes, game.currentSceneId)?.introText);
 		endTimers = [
 			setTimeout(enterTvOff, ENDING_CINEMA_MS),
 			setTimeout(finishEnding, ENDING_CINEMA_MS + ENDING_TVOFF_MS)
@@ -692,7 +697,8 @@
 		const s = findScene(b.scenes, state.currentSceneId);
 		presentGiveables = s ? rollGiveableItems(s) : [];
 		for (const t of narration) push('narration', t);
-		push('narration', s?.introText);
+		// Intro text may hold several variants (split by a "---" line) — show one.
+		push('narration', pickTextVariant(s?.introText));
 		activeBehaviourId = shipComputer(b);
 	}
 
@@ -1400,10 +1406,10 @@
 									</div>
 								{/if}
 							</div>
-							{#if endScene?.introText}
+							{#if endingText}
 								<div class="ending-credits">
 									<div class="ending-roll" style:animation-duration={`${ENDING_CINEMA_MS}ms`}>
-										{endScene.introText}
+										{endingText}
 									</div>
 								</div>
 							{/if}
