@@ -11,6 +11,11 @@ export async function uploadImage(file: File, prefix = 'scenes'): Promise<string
 	return getDownloadURL(fileRef);
 }
 
+// Scene ambient audio (looped on enter). Stored as-is — returns a download URL.
+export async function uploadAudio(file: File): Promise<string> {
+	return uploadImage(file, 'audio');
+}
+
 // Item icons are capped at 200×200 so the build never accumulates heavy images.
 // PNG/JPEG larger than that are downscaled client-side (aspect preserved); GIFs
 // can't be resized without losing their animation, so oversized ones are

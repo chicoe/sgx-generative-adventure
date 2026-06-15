@@ -89,6 +89,7 @@ export interface Scene {
 	introText?: string; // optional narration shown on enter
 	prompt?: string; // scene description + instructions given to the LLM as context
 	giveableItems?: GiveableItem[]; // items the computer may grant here (rolled per run)
+	ambientSound?: string; // looped background audio (URL) played quietly on enter
 	start?: boolean; // a possible starting scene — one is chosen at random per run
 	ending?: boolean; // reaching it ends the run (then auto/interaction restart)
 }

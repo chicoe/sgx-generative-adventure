@@ -76,6 +76,7 @@ export const sceneSchema = z.object({
 	introText: z.string().optional(),
 	prompt: z.string().optional(),
 	giveableItems: z.array(giveableItemSchema).optional(),
+	ambientSound: z.string().optional(),
 	start: z.boolean().optional(),
 	ending: z.boolean().optional()
 });

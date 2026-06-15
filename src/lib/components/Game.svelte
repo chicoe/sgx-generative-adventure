@@ -436,6 +436,7 @@
 	}
 	function enterTvOff() {
 		endingPhase = 'tvoff';
+		stopSceneAmbient(); // the screen is shutting down — silence the ambient
 		playSfx('tvoff'); // the screen-shutting-down sound
 	}
 	function beginEnding() {
@@ -478,6 +479,34 @@
 
 	// Items the computer may give in the current scene THIS run (rolled on entry).
 	let presentGiveables = $state<string[]>([]);
+
+	// Per-scene ambient audio: loops quietly while in a scene (kept lower than the
+	// feedback sfx). One <audio> element, src-swapped on scene change.
+	const SCENE_AMBIENT_VOLUME = 0.35;
+	let ambientEl = $state<HTMLAudioElement>();
+	let ambientSrc = '';
+	function playSceneAmbient(s: Scene | undefined) {
+		if (!ambientEl) return;
+		const url = s?.ambientSound?.trim() ? imgUrl(s.ambientSound) : '';
+		if (url === ambientSrc) return; // already playing this one (don't restart)
+		ambientSrc = url;
+		if (!url) {
+			ambientEl.pause();
+			ambientEl.removeAttribute('src');
+			return;
+		}
+		ambientEl.src = url;
+		ambientEl.volume = SCENE_AMBIENT_VOLUME;
+		ambientEl.loop = true;
+		void ambientEl.play().catch(() => {});
+	}
+	function stopSceneAmbient() {
+		ambientSrc = '';
+		if (ambientEl) {
+			ambientEl.pause();
+			ambientEl.removeAttribute('src');
+		}
+	}
 
 	// The deck plan starts collapsed; it opens via the "0" key, by using an item
 	// with id "map", or when the computer picks the __map__ outcome.
@@ -699,6 +728,7 @@
 		for (const t of narration) push('narration', t);
 		// Intro text may hold several variants (split by a "---" line) — show one.
 		push('narration', pickTextVariant(s?.introText));
+		playSceneAmbient(s); // loop this scene's ambient (or stop if it has none)
 		activeBehaviourId = shipComputer(b);
 	}
 
@@ -1334,6 +1364,7 @@
 			splashTimers.forEach(clearTimeout);
 			scanTimers.forEach(clearTimeout);
 			endTimers.forEach(clearTimeout);
+			stopSceneAmbient();
 			unsubLive?.();
 		};
 	});
@@ -1368,6 +1399,8 @@
 	<main class="failpage"><span>please restart</span></main>
 {:else}
 	<main class="letterbox" style:background={backdrop}>
+		<!-- Per-scene ambient loop (src swapped on scene change). -->
+		<audio bind:this={ambientEl} loop hidden></audio>
 		<!-- Duotone luminance map (dark → bg, light → ui) for the "old monitor" mode. -->
 		<svg width="0" height="0" aria-hidden="true" style="position:absolute">
 			<filter id="sgx-duotone" color-interpolation-filters="sRGB">

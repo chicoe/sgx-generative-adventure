@@ -4,7 +4,7 @@
 	import EffectsEditor from '$lib/components/editor/EffectsEditor.svelte';
 	import { loadDraft, saveScene, deleteSceneAndLinks } from '$lib/content/draft';
 	import { draftStatus } from '$lib/content/draftStatus.svelte';
-	import { uploadImage } from '$lib/firebase/storage';
+	import { uploadImage, uploadAudio } from '$lib/firebase/storage';
 	import type { Scene } from '$lib/engine/types';
 
 	let scenes = $state<Scene[]>([]);
@@ -166,6 +166,20 @@
 		message = '';
 		try {
 			addLayerImage(i, await uploadImage(file, 'scenes'));
+		} catch (e) {
+			message = e instanceof Error ? e.message : String(e);
+		} finally {
+			uploading = false;
+		}
+	}
+
+	// Scene ambient audio: looped quietly on enter (upload or paste a URL).
+	async function uploadAmbient(file?: File) {
+		if (!file || !current) return;
+		uploading = true;
+		message = '';
+		try {
+			current.ambientSound = await uploadAudio(file);
 		} catch (e) {
 			message = e instanceof Error ? e.message : String(e);
 		} finally {
@@ -353,6 +367,27 @@
 		</fieldset>
 
 		<fieldset>
+			<legend>ambient sound (loops quietly while in this scene)</legend>
+			<div class="rowline">
+				<input placeholder="audio path / URL" bind:value={current.ambientSound} />
+				<input
+					type="file"
+					accept="audio/*"
+					onchange={(e) => uploadAmbient(e.currentTarget.files?.[0])}
+				/>
+				{#if current.ambientSound}
+					<button type="button" class="x" title="clear" onclick={() => (current!.ambientSound = '')}
+						>✕</button
+					>
+				{/if}
+			</div>
+			{#if current.ambientSound}
+				<audio src={imgUrl(current.ambientSound)} controls preload="none" class="ambient-preview"
+				></audio>
+			{/if}
+		</fieldset>
+
+		<fieldset>
 			<legend
 				>giveable items (the computer may hand these out here — presence rolled per run)</legend
 			>
@@ -492,6 +527,11 @@
 		display: flex;
 		gap: 0.4rem;
 		align-items: center;
+	}
+	.ambient-preview {
+		margin-top: 0.5rem;
+		width: 100%;
+		height: 2rem;
 	}
 	.rowline input:not(.sm):not([type='number']):not([type='file']) {
 		flex: 1;
