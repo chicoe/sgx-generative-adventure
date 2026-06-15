@@ -414,9 +414,12 @@
 
 	// Ending cinematic: an ending scene plays full-screen (only its art, drifting
 	// with parallax) while its intro text scrolls like credits, then a CRT
-	// power-off, then back to the "press any key to start" screen.
+	// power-off, then a dark transition message, then "press any key to start".
 	let atEnding = $state(false);
-	let endingPhase = $state<'cinema' | 'tvoff' | 'wait' | null>(null);
+	let endingPhase = $state<'cinema' | 'tvoff' | 'message' | 'wait' | null>(null);
+	// The transition message shown on the dark screen after the power-off.
+	const ENDING_MESSAGE_LINE_1 = 'One story ends here';
+	const ENDING_MESSAGE_LINE_2 = 'Another one is about to begin';
 	let endTimers: ReturnType<typeof setTimeout>[] = [];
 	// ── Ending tunables ────────────────────────────────────────────────────
 	// How long the full-screen scene holds while the credits scroll, in seconds.
@@ -424,6 +427,7 @@
 	const ENDING_CREDITS_SECONDS = 25;
 	const ENDING_CINEMA_MS = ENDING_CREDITS_SECONDS * 1000;
 	const ENDING_TVOFF_MS = 700; // the dramatic power-off collapse
+	const ENDING_MESSAGE_MS = 5000; // the dark transition screen with the two messages
 	const ENDING_AMP = 45; // parallax shift (px) for the ending pan (keep modest — bigger = more zoom)
 	let endCinemaStart = 0; // timestamp the credits/pan began (drives the slow pan)
 	// The credits text for THIS run — one variant, picked once when the ending
@@ -447,20 +451,28 @@
 		endingText = pickTextVariant(findScene(build.scenes, game.currentSceneId)?.introText);
 		endTimers = [
 			setTimeout(enterTvOff, ENDING_CINEMA_MS),
-			setTimeout(finishEnding, ENDING_CINEMA_MS + ENDING_TVOFF_MS)
+			setTimeout(showEndMessage, ENDING_CINEMA_MS + ENDING_TVOFF_MS),
+			setTimeout(showEndWait, ENDING_CINEMA_MS + ENDING_TVOFF_MS + ENDING_MESSAGE_MS)
 		];
 	}
-	function finishEnding() {
+	function showEndMessage() {
+		// Dark screen with the two transition messages (in-frame, so the CRT
+		// applies); after ENDING_MESSAGE_MS the "press any key" prompt appears.
+		endingPhase = 'message';
+	}
+	function showEndWait() {
+		// "Press any key to start" — a key then begins the next cycle.
 		clearEndTimers();
-		// Stay in the ending overlay (so the CRT applies) and slowly fade up the
-		// "press any key to start" prompt; a key then starts the next cycle.
 		endingPhase = 'wait';
 	}
 	function skipEnding() {
-		// Jump straight to the power-off (so a tester needn't watch all 10s).
+		// Jump straight to the power-off (so a tester needn't watch the whole roll).
 		clearEndTimers();
 		enterTvOff();
-		endTimers = [setTimeout(finishEnding, ENDING_TVOFF_MS)];
+		endTimers = [
+			setTimeout(showEndMessage, ENDING_TVOFF_MS),
+			setTimeout(showEndWait, ENDING_TVOFF_MS + ENDING_MESSAGE_MS)
+		];
 	}
 
 	// The computer the terminal is talking to (the current scene's), plus that
@@ -1173,11 +1185,12 @@
 			skipSplash();
 			return;
 		}
-		// Ending: a key skips the credits to the power-off; on the "press any key"
-		// screen it starts the next cycle.
+		// Ending: a key skips the credits to the power-off, skips the transition
+		// message to the prompt, and from the prompt starts the next cycle.
 		if (atEnding) {
 			e.preventDefault();
 			if (endingPhase === 'cinema') skipEnding();
+			else if (endingPhase === 'message') showEndWait();
 			else if (endingPhase === 'wait') void restart();
 			return;
 		}
@@ -1423,9 +1436,16 @@
 				     credits scroll, then a CRT power-off. Same duotone filter as the
 				     normal content so the art stays on-palette. -->
 				<div class="endwrap" class:duo={display.mode !== 'full'}>
-					{#if endingPhase === 'wait'}
-						<!-- After the power-off: the screen slowly fades back to the
-						     "press any key" prompt (in-frame, so the CRT overlay applies). -->
+					{#if endingPhase === 'message'}
+						<!-- Dark transition screen: two lines fade in (the second a beat
+						     after the first), in-frame so the CRT overlay applies. -->
+						<div class="ending-message">
+							<p class="em-line one">{ENDING_MESSAGE_LINE_1}</p>
+							<p class="em-line two">{ENDING_MESSAGE_LINE_2}</p>
+						</div>
+					{:else if endingPhase === 'wait'}
+						<!-- The "press any key to start" prompt fades in; a key boots the
+						     next cycle (in-frame, so the CRT overlay applies). -->
 						<div class="ending-wait"><span>press any key to start</span></div>
 					{:else}
 						<div class="ending-scene" class:tvoff={endingPhase === 'tvoff'}>
@@ -1888,13 +1908,46 @@
 			transform: scale(1);
 		}
 	}
-	/* Post power-off: the "press any key" prompt fades back in very slowly. */
+	/* Post power-off: two transition lines fade in (second a beat after the first)
+	   on the dark screen, separated by ~3 blank lines. */
+	.ending-message {
+		position: absolute;
+		inset: 0;
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		justify-content: center;
+		gap: 4.2em; /* ≈ 3 blank lines between them */
+		text-align: center;
+		padding: 1rem;
+	}
+	.em-line {
+		margin: 0;
+		font-family: var(--font-terminal);
+		font-size: 1.3rem;
+		letter-spacing: 0.16em;
+		color: var(--ink);
+		text-shadow: var(--glow);
+		opacity: 0;
+	}
+	.em-line.one {
+		animation: em-fadein 1.4s ease-out forwards;
+	}
+	.em-line.two {
+		animation: em-fadein 1.4s ease-out 1s forwards; /* a second later */
+	}
+	@keyframes em-fadein {
+		to {
+			opacity: 1;
+		}
+	}
+	/* After the message: the "press any key to start" prompt fades in. */
 	.ending-wait {
 		position: absolute;
 		inset: 0;
 		display: grid;
 		place-items: center;
-		animation: end-wait-fadein 3.5s ease-in both;
+		animation: em-fadein 1.2s ease-out forwards;
 	}
 	.ending-wait span {
 		font-family: var(--font-terminal);
@@ -1903,17 +1956,6 @@
 		color: var(--ink-dim);
 		text-shadow: var(--glow);
 		animation: blink 1.1s steps(1) infinite;
-	}
-	@keyframes end-wait-fadein {
-		0% {
-			opacity: 0;
-		}
-		40% {
-			opacity: 0;
-		}
-		100% {
-			opacity: 1;
-		}
 	}
 	@keyframes end-fadein {
 		from {
