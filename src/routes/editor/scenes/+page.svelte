@@ -298,7 +298,14 @@
 							<div class="variants">
 								{#each layerPool(layer) as p, j (`${p}-${j}`)}
 									<span class="variant">
-										<img class="thumb" src={imgUrl(p)} alt="" title={p} />
+										<button
+											type="button"
+											class="thumb-open"
+											title="open image in a new tab"
+											onclick={() => window.open(imgUrl(p), '_blank', 'noopener,noreferrer')}
+										>
+											<img class="thumb" src={imgUrl(p)} alt="" />
+										</button>
 										<button
 											type="button"
 											class="x vx"
@@ -507,6 +514,19 @@
 		height: 40px;
 		object-fit: cover;
 		border: 1px solid var(--line);
+		display: block;
+	}
+	/* Clickable thumbnail: a bare button wrapper (opens the image in a new tab). */
+	.thumb-open {
+		padding: 0;
+		border: 0;
+		background: none;
+		cursor: pointer;
+		display: inline-flex;
+		line-height: 0;
+	}
+	.thumb-open:hover .thumb {
+		border-color: var(--accent);
 	}
 	/* A layer's image pool: thumbnails with a per-image remove. */
 	.variants {

@@ -1102,6 +1102,13 @@
 			onIntroKey(e);
 			return;
 		}
+		// Up/Down scroll the chat transcript — even while the composer has focus
+		// (preventDefault keeps the text caret and page from moving).
+		if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+			e.preventDefault();
+			scrollTranscript(e.key === 'ArrowUp' ? -1 : 1);
+			return;
+		}
 		const el = e.target as HTMLElement | null;
 		if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA')) return;
 		switch (e.key) {
@@ -1113,25 +1120,63 @@
 				target.x = 1;
 				e.preventDefault();
 				break;
-			case 'ArrowUp':
-				target.y = -1;
-				e.preventDefault();
-				break;
-			case 'ArrowDown':
-				target.y = 1;
-				e.preventDefault();
-				break;
 		}
 	}
 	function onKeyup(e: KeyboardEvent) {
 		if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') target.x = 0;
-		if (e.key === 'ArrowUp' || e.key === 'ArrowDown') target.y = 0;
 	}
 
 	let transcriptEl = $state<HTMLDivElement>();
+	// Old-OS scrollbar metrics (thumb size + position track the transcript).
+	let scTop = $state(0);
+	let scHeight = $state(0);
+	let scClient = $state(0);
+	function syncScroll() {
+		if (!transcriptEl) return;
+		scTop = transcriptEl.scrollTop;
+		scHeight = transcriptEl.scrollHeight;
+		scClient = transcriptEl.clientHeight;
+	}
+	const sbThumbPct = $derived(scHeight > 0 ? Math.min(1, scClient / scHeight) : 1);
+	const sbThumbTopPct = $derived(scHeight > scClient ? scTop / scHeight : 0);
 	$effect(() => {
 		if (lines.length && transcriptEl) transcriptEl.scrollTop = transcriptEl.scrollHeight;
+		syncScroll();
 	});
+	// Scroll the chat transcript (arrow keys + the on-screen up/down buttons).
+	function scrollTranscript(dir: -1 | 1) {
+		if (!transcriptEl) return;
+		transcriptEl.scrollBy({
+			top: dir * Math.round(transcriptEl.clientHeight * 0.6),
+			behavior: 'smooth'
+		});
+	}
+	// Drag the scrollbar thumb: map vertical pointer movement to scrollTop.
+	let sbTrackEl = $state<HTMLDivElement>();
+	function onThumbDown(e: PointerEvent) {
+		e.preventDefault();
+		if (!transcriptEl || !sbTrackEl) return;
+		const startY = e.clientY;
+		const startTop = transcriptEl.scrollTop;
+		const trackH = sbTrackEl.clientHeight;
+		const move = (ev: PointerEvent) => {
+			if (!transcriptEl) return;
+			transcriptEl.scrollTop = startTop + (ev.clientY - startY) * (scHeight / Math.max(1, trackH));
+		};
+		const up = () => {
+			window.removeEventListener('pointermove', move);
+			window.removeEventListener('pointerup', up);
+		};
+		window.addEventListener('pointermove', move);
+		window.addEventListener('pointerup', up);
+	}
+	// Click the track (not the thumb): jump to that position.
+	function onTrackDown(e: PointerEvent) {
+		if (!transcriptEl || !sbTrackEl || e.target !== sbTrackEl) return;
+		const rect = sbTrackEl.getBoundingClientRect();
+		const frac = (e.clientY - rect.top) / Math.max(1, rect.height);
+		transcriptEl.scrollTop = frac * scHeight - scClient / 2;
+	}
 
 	// Kiosk focus lock: there is no mouse — the composer must always own the
 	// keyboard. Focus it on load, re-focus when it re-enables after a send, and
@@ -1422,8 +1467,8 @@
 					</div>
 				</div>
 
-				<section class="terminal">
-					<div class="transcript" bind:this={transcriptEl}>
+				<section class="terminal withscroll">
+					<div class="transcript" bind:this={transcriptEl} onscroll={syncScroll}>
 						{#each lines as line (line.id)}
 							<p
 								class={line.who}
@@ -1455,6 +1500,43 @@
 							onblur={refocus}
 						/>
 					</form>
+
+					<!-- Old-OS scrollbar: ▲ on top, ▼ on bottom, draggable thumb between
+					     (mirrors the Up/Down keys). tabindex -1 + mousedown-prevent so
+					     clicking never steals the composer focus. -->
+					<div class="scrollbar" aria-hidden="true">
+						<button
+							type="button"
+							class="sb-arrow"
+							tabindex="-1"
+							onmousedown={(e) => e.preventDefault()}
+							onclick={() => scrollTranscript(-1)}
+							title="scroll up (↑)">▲</button
+						>
+						<!-- svelte-ignore a11y_no_static_element_interactions -->
+						<div
+							class="sb-track"
+							bind:this={sbTrackEl}
+							onpointerdown={onTrackDown}
+							onmousedown={(e) => e.preventDefault()}
+						>
+							<!-- svelte-ignore a11y_no_static_element_interactions -->
+							<div
+								class="sb-thumb"
+								style:top={`${sbThumbTopPct * 100}%`}
+								style:height={`${sbThumbPct * 100}%`}
+								onpointerdown={onThumbDown}
+							></div>
+						</div>
+						<button
+							type="button"
+							class="sb-arrow"
+							tabindex="-1"
+							onmousedown={(e) => e.preventDefault()}
+							onclick={() => scrollTranscript(1)}
+							title="scroll down (↓)">▼</button
+						>
+					</div>
 				</section>
 
 				{#if introActive}
@@ -2150,6 +2232,67 @@
 		text-shadow: var(--glow);
 		box-shadow: 0 0 22px rgba(255, 176, 0, 0.06);
 	}
+	/* Game terminal: leave a right gutter for the scroll arrows (the interview
+	   reuses .terminal but has no arrows, so this is scoped to .withscroll). */
+	.terminal.withscroll {
+		position: relative;
+		padding-right: 46px;
+	}
+	/* Old-OS scrollbar in the terminal's right gutter. */
+	.scrollbar {
+		position: absolute;
+		top: 12px;
+		bottom: 12px;
+		right: 8px;
+		width: 26px;
+		display: flex;
+		flex-direction: column;
+		gap: 4px;
+	}
+	.sb-arrow {
+		flex: none;
+		height: 26px;
+		font: inherit;
+		font-size: 0.7rem;
+		line-height: 1;
+		color: var(--ink-dim);
+		background: var(--panel);
+		border: 1px solid var(--line);
+		cursor: pointer;
+	}
+	.sb-arrow:hover {
+		color: var(--accent);
+		border-color: var(--accent);
+	}
+	.sb-arrow:active {
+		color: var(--bg);
+		background: var(--ink);
+	}
+	.sb-track {
+		flex: 1;
+		min-height: 0;
+		position: relative;
+		background: var(--panel);
+		border: 1px solid var(--line);
+		cursor: pointer;
+	}
+	.sb-thumb {
+		position: absolute;
+		left: 1px;
+		right: 1px;
+		min-height: 16px;
+		background: var(--ink-dim);
+		border: 1px solid var(--line);
+		box-shadow: 0 0 6px rgba(255, 176, 0, 0.25) inset;
+		cursor: grab;
+	}
+	.sb-thumb:hover {
+		background: var(--ink);
+	}
+	.sb-thumb:active {
+		cursor: grabbing;
+		background: var(--ink);
+	}
 	.transcript {
 		flex: 1;
 		min-height: 0;
@@ -2178,6 +2321,13 @@
 	}
 	.transcript::-webkit-scrollbar-thumb:hover {
 		background: var(--ink);
+	}
+	/* The game terminal has its own old-OS scrollbar — hide the native one there. */
+	.withscroll .transcript {
+		scrollbar-width: none;
+	}
+	.withscroll .transcript::-webkit-scrollbar {
+		display: none;
 	}
 	.transcript p {
 		margin: 0;
