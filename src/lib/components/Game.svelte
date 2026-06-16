@@ -77,14 +77,31 @@
 		const keep = urls.map((u) => new URL(u, location.href).href);
 		navigator.serviceWorker?.controller?.postMessage({ type: 'prune-media', keep });
 	}
-	// This experience targets Chrome/Chromium (the kiosk runs Chromium). On any
-	// other engine (Firefox, Safari) show a one-time notice over the boot, which
-	// any key/click dismisses. Chromium browsers expose `userAgentData`; others
-	// don't, and the UA regex is a belt-and-braces fallback.
-	let browserWarn = $state(false);
+	// This experience targets desktop Chrome/Chromium (the kiosk runs Chromium).
+	//  - On a phone/tablet: a HARD, non-dismissable block (keyboard-only desktop
+	//    experience — there's no point letting it through).
+	//  - On a non-Chromium DESKTOP browser (Firefox/Safari): a soft notice that
+	//    any key/click dismisses ("continue anyway").
+	// Chromium browsers expose `userAgentData`; the UA regex is a fallback. The
+	// Raspberry Pi reports a desktop-Linux UA, so the mobile check never trips it.
+	let browserWarn = $state(false); // dismissable, non-Chromium desktop
+	let mobileBlock = $state(false); // non-dismissable, phone/tablet
 	function isChromium(): boolean {
 		if (typeof navigator === 'undefined') return true;
 		return 'userAgentData' in navigator || /\bChrom(e|ium)\//.test(navigator.userAgent);
+	}
+	function isMobileDevice(): boolean {
+		if (typeof navigator === 'undefined') return false;
+		const uaData = (navigator as unknown as { userAgentData?: { mobile?: boolean } }).userAgentData;
+		if (uaData?.mobile) return true;
+		// iPadOS presents as desktop Safari but has multiple touch points.
+		const iPadOS = navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1;
+		return (
+			iPadOS ||
+			/Android|iPhone|iPad|iPod|Mobile|Tablet|Silk|Kindle|BlackBerry|Opera Mini|IEMobile|webOS/i.test(
+				navigator.userAgent
+			)
+		);
 	}
 	let game = $state<GameState>(startGame(placeholderBuild).state);
 	// Per-run layer-art choices ("sceneId/layerId" → image) — rolled in initFrom.
@@ -1315,8 +1332,15 @@
 
 	onMount(() => {
 		computeScale();
-		browserWarn = !isChromium();
+		mobileBlock = isMobileDevice();
+		browserWarn = !mobileBlock && !isChromium();
 		const clockId = setInterval(() => (clockNow = Date.now()), 1000);
+		// Phone/tablet: hard block — don't load the build, preload, or animate.
+		if (mobileBlock) return () => clearInterval(clockId);
+		// Kiosk mode (?kiosk in the URL): preload all media up front behind the
+		// loading screen so the live link only bites once. Without the tag we load
+		// assets on demand (lighter start) — the service worker still caches them.
+		const kioskMode = new URLSearchParams(window.location.search).has('kiosk');
 		// Nothing visual starts here: the splash stays pure black until the build
 		// (palette + geometry) is in, then the BOOT gif opens the cycle and the
 		// interview follows it (startSplash + beginIntro in loadBuild's then).
@@ -1347,20 +1371,22 @@
 					watchLive(null);
 					return;
 				}
-				// Cache every image + audio the build uses BEFORE the game starts, so
-				// the kiosk's slow link only bites during this loading screen. Capped so
-				// a dead asset can't hang the boot; the runtime loads stragglers lazily.
+				// Kiosk mode: cache every image + audio the build uses BEFORE the game
+				// starts, so the live link only bites during this loading screen. Capped
+				// so a dead asset can't hang the boot; stragglers load lazily.
 				// NB: preload on `loaded` directly — do NOT commit `build`/`game` until
 				// after, or `build` (new) and `game` (still placeholder) would mismatch
 				// and the scene render would dereference a non-existent scene.
 				const assets = collectBuildAssets(loaded);
-				await Promise.race([
-					preloadAssets(assets, (d, t) => {
-						preloadDone = d;
-						preloadTotal = t;
-					}),
-					new Promise((r) => setTimeout(r, PRELOAD_MAX_MS))
-				]);
+				if (kioskMode) {
+					await Promise.race([
+						preloadAssets(assets, (d, t) => {
+							preloadDone = d;
+							preloadTotal = t;
+						}),
+						new Promise((r) => setTimeout(r, PRELOAD_MAX_MS))
+					]);
+				}
 				pruneMediaCache(assets);
 				// Commit the new build and its initial game state together (atomic).
 				buildSource = source;
@@ -1417,9 +1443,21 @@
 <svelte:head><title>Adventure Engine — Play</title></svelte:head>
 <svelte:window onkeydown={onKeydown} onkeyup={onKeyup} onresize={computeScale} />
 
-{#if browserWarn}
-	<!-- Topmost, palette-independent (hardcoded colours): the build's theme may not
-	     be loaded yet. Any key (see onKeydown) or a click dismisses it. -->
+{#if mobileBlock}
+	<!-- Phone/tablet: a hard, non-dismissable block (keyboard-only desktop
+	     experience). Topmost, palette-independent hardcoded colours. -->
+	<div class="browserwarn" role="alert">
+		<div class="bw-box">
+			<p class="bw-title">⚠ DESKTOP CHROME ONLY</p>
+			<p>
+				This is a desktop experience built for <strong>Google Chrome</strong>. Please open it on a
+				computer using Chrome.
+			</p>
+		</div>
+	</div>
+{:else if browserWarn}
+	<!-- Non-Chromium desktop: a soft notice; any key (see onKeydown) or a click
+	     dismisses it. Topmost, palette-independent hardcoded colours. -->
 	<div
 		class="browserwarn"
 		role="button"

@@ -16,7 +16,9 @@ set -euo pipefail
 # --- config (override via the environment) ----------------------------------
 APP_DIR="${APP_DIR:-$(cd "$(dirname "$0")/.." && pwd)}"
 PORT="${PORT:-3000}"
-URL="${KIOSK_URL:-http://localhost:${PORT}/play}"
+# The ?kiosk tag turns on up-front media preloading (everything cached behind
+# the loading screen). Non-kiosk visitors (no tag) load assets on demand.
+URL="${KIOSK_URL:-http://localhost:${PORT}/play?kiosk=1}"
 
 cd "$APP_DIR"
 
