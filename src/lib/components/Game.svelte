@@ -18,6 +18,7 @@
 	import { MAP_OUTCOME_ID, SCAN_OUTCOME_ID } from '$lib/llm/adjudicate';
 	import { audioUnlocked, playSfx, playDrone } from '$lib/sfx';
 	import { pickTextVariant } from '$lib/text';
+	import { collectBuildAssets, preloadAssets } from '$lib/content/preload';
 	import { DEFAULT_DISPLAY, themeStyle, duotoneTable, crtBackground } from '$lib/theme';
 	import type { Build, ConversationTurn, Effect, GameState, Item, Scene } from '$lib/engine/types';
 
@@ -63,6 +64,19 @@
 	// discrete black "please restart" page — placeholder content never runs.
 	let loading = $state(true);
 	let failed = $state(false);
+	// Up-front asset preload (images/audio cached before the game starts, so a
+	// weak kiosk connection only hurts this one loading screen). Progress drives
+	// the loading text; an overall cap keeps a dead asset from stalling boot.
+	let preloadDone = $state(0);
+	let preloadTotal = $state(0);
+	const preloadPct = $derived(preloadTotal ? Math.round((preloadDone / preloadTotal) * 100) : 0);
+	const PRELOAD_MAX_MS = 120_000;
+	// Tell the service worker to keep only this build's media (drop orphans).
+	function pruneMediaCache(urls: string[]) {
+		if (typeof navigator === 'undefined') return;
+		const keep = urls.map((u) => new URL(u, location.href).href);
+		navigator.serviceWorker?.controller?.postMessage({ type: 'prune-media', keep });
+	}
 	// This experience targets Chrome/Chromium (the kiosk runs Chromium). On any
 	// other engine (Firefox, Safari) show a one-time notice over the boot, which
 	// any key/click dismisses. Chromium browsers expose `userAgentData`; others
@@ -486,8 +500,9 @@
 	const scene = $derived(findScene(build.scenes, game.currentSceneId)!);
 
 	// A scene with no usable layer art shows a "no signal" static screen (the
-	// client hasn't supplied art for it yet).
-	const sceneHasArt = (s: Scene) => s.layers.some((l) => layerImagePool(l).length > 0);
+	// client hasn't supplied art for it yet). Defensive against a missing scene.
+	const sceneHasArt = (s: Scene | undefined) =>
+		!!s && s.layers.some((l) => layerImagePool(l).length > 0);
 
 	// Items the computer may give in the current scene THIS run (rolled on entry).
 	let presentGiveables = $state<string[]>([]);
@@ -1323,7 +1338,7 @@
 			});
 		};
 		loadBuild()
-			.then(({ build: loaded, source }) => {
+			.then(async ({ build: loaded, source }) => {
 				if (source === 'placeholder') {
 					// Live build unavailable (network error / nothing published): never
 					// run the placeholder — show the discrete fail page instead.
@@ -1332,6 +1347,22 @@
 					watchLive(null);
 					return;
 				}
+				// Cache every image + audio the build uses BEFORE the game starts, so
+				// the kiosk's slow link only bites during this loading screen. Capped so
+				// a dead asset can't hang the boot; the runtime loads stragglers lazily.
+				// NB: preload on `loaded` directly — do NOT commit `build`/`game` until
+				// after, or `build` (new) and `game` (still placeholder) would mismatch
+				// and the scene render would dereference a non-existent scene.
+				const assets = collectBuildAssets(loaded);
+				await Promise.race([
+					preloadAssets(assets, (d, t) => {
+						preloadDone = d;
+						preloadTotal = t;
+					}),
+					new Promise((r) => setTimeout(r, PRELOAD_MAX_MS))
+				]);
+				pruneMediaCache(assets);
+				// Commit the new build and its initial game state together (atomic).
 				buildSource = source;
 				build = loaded;
 				initFrom(loaded);
@@ -1759,7 +1790,17 @@
 			>
 				{#if needsKeyToStart}
 					<div class="startprompt"><span>press any key to start</span></div>
-				{:else if !loading}
+				{:else if loading}
+					<!-- Initial loading screen while the build's media is cached up front. -->
+					<div class="loadprompt">
+						<span>loading{preloadTotal ? ` · ${preloadPct}%` : '…'}</span>
+						{#if preloadTotal}
+							<div class="loadbar">
+								<div class="loadbar-fill" style:width={`${preloadPct}%`}></div>
+							</div>
+						{/if}
+					</div>
+				{:else}
 					<!-- The window area keeps its bg colour + CRT for the WHOLE splash —
 					     the gif fades out over it into the post-gif beat. -->
 					<div class="bootframe" style="{framePlacement};background:{pageBg}">
@@ -2096,6 +2137,33 @@
 		letter-spacing: 0.2em;
 		color: #555;
 		animation: blink 1.1s steps(1) infinite;
+	}
+	/* Initial asset-caching screen (palette-independent dim text on black). */
+	.loadprompt {
+		position: absolute;
+		inset: 0;
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		justify-content: center;
+		gap: 0.9rem;
+	}
+	.loadprompt span {
+		font-family: var(--font-terminal);
+		font-size: 0.95rem;
+		letter-spacing: 0.2em;
+		color: #555;
+	}
+	.loadbar {
+		width: 11rem;
+		height: 3px;
+		background: #222;
+		overflow: hidden;
+	}
+	.loadbar-fill {
+		height: 100%;
+		background: #555;
+		transition: width 0.2s linear;
 	}
 
 	/* Sits under the interview, over the game: bg-coloured, never transparent —
