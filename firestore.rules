@@ -45,6 +45,24 @@ service cloud.firestore {
       allow read, write: if true;
     }
 
+    // Access codes gate the public game. Editors manage them; players (no auth)
+    // may look up ONE code they know and spend exactly one life — nothing else.
+    match /accessCodes/{code} {
+      allow get: if true;            // a visitor can check a code they were given
+      allow list: if isEditor();     // …but only editors can enumerate all codes
+      allow create, delete: if isEditor();
+      // Editors may edit freely; the public may ONLY decrement lives by one (the
+      // "consume", and only while lives remain) — no other field may change.
+      allow update: if isEditor()
+        || (
+          resource.data.lives > 0
+          && request.resource.data.lives == resource.data.lives - 1
+          && request.resource.data.code == resource.data.code
+          && request.resource.data.livesTotal == resource.data.livesTotal
+          && request.resource.data.createdAt == resource.data.createdAt
+        );
+    }
+
     // Deny everything else.
     match /{document=**} {
       allow read, write: if false;

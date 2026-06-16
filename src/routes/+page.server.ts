@@ -1,6 +1,12 @@
 import { redirect } from '@sveltejs/kit';
 import { resolve } from '$app/paths';
+import type { PageServerLoad } from './$types';
 
-// There's no standalone landing page — send visitors straight into the game.
-// 307 (temporary) so it isn't permanently cached if a real home page lands later.
-export const load = () => redirect(307, resolve('/play'));
+// The landing page is the access-code gate (see +page.svelte). The only bypass
+// is ?specialaccess=sgx, which goes straight into the game with no code.
+export const load: PageServerLoad = ({ url }) => {
+	if (url.searchParams.get('specialaccess') === 'sgx') {
+		redirect(307, `${resolve('/play')}?specialaccess=sgx`);
+	}
+	return {};
+};

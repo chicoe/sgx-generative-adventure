@@ -16,8 +16,10 @@
 	import { doc, onSnapshot } from 'firebase/firestore';
 	import { db } from '$lib/firebase/client';
 	import { MAP_OUTCOME_ID, SCAN_OUTCOME_ID } from '$lib/llm/adjudicate';
+	import { resolve } from '$app/paths';
 	import { audioUnlocked, playSfx, playDrone } from '$lib/sfx';
 	import { pickTextVariant } from '$lib/text';
+	import { spendAccessLife } from '$lib/content/accessCodes';
 	import { collectBuildAssets, preloadAssets } from '$lib/content/preload';
 	import { DEFAULT_DISPLAY, themeStyle, duotoneTable, crtBackground } from '$lib/theme';
 	import type { Build, ConversationTurn, Effect, GameState, Item, Scene } from '$lib/engine/types';
@@ -29,10 +31,15 @@
 		loadBuild = loadActiveBuild,
 		// Watch config/current and fully reload when a new version is published, so
 		// the kiosk picks up updates by itself. /testplay opts out (it runs the draft).
-		reloadOnPublish = true
+		reloadOnPublish = true,
+		// Access code for this session (from /play?code=…). When set, ONE life is
+		// spent each time a run starts (the interview is answered/skipped); when the
+		// code is out of lives the player is bounced back to the code prompt.
+		accessCode = undefined
 	}: {
 		loadBuild?: () => Promise<{ build: Build; source: BuildSource }>;
 		reloadOnPublish?: boolean;
+		accessCode?: string;
 	} = $props();
 
 	const clamp = (n: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, n));
@@ -292,6 +299,8 @@
 		};
 		profileTurn = turn;
 		convo = [...convo, turn];
+		// A run has begun — spend one life on the access code (no-op without one).
+		void consumeAccessLife();
 		// Fade to the background colour over the form, then run the INTRO gif; the
 		// game (and its opening greeting) follows once it finishes.
 		introFading = true;
@@ -301,6 +310,18 @@
 			introFading = false;
 			pendingOpening = true;
 		}, INTRO_FADE_MS + 150);
+	}
+
+	// Spend one life on the access code (when a run starts). If the code is out of
+	// lives (or unknown), bounce back to the code prompt. No code → nothing to do.
+	async function consumeAccessLife() {
+		if (!accessCode) return;
+		const res = await spendAccessLife(accessCode);
+		// Only bounce on a definite "no lives / unknown" — a transient error lets
+		// this run continue rather than kicking the player out on a network blip.
+		if (!res.ok && (res.reason === 'depleted' || res.reason === 'unknown')) {
+			location.href = resolve('/');
+		}
 	}
 
 	// Fires the opening greeting only once the post-interview intro gif has
