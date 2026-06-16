@@ -1996,7 +1996,7 @@
 		flex-direction: column;
 		align-items: center;
 		justify-content: center;
-		gap: 4.2em; /* ≈ 3 blank lines between them */
+		gap: 0; /* the two lines sit right after each other */
 		text-align: center;
 		padding: 1rem;
 	}
