@@ -14,6 +14,7 @@ export interface PromptParts {
 export interface SceneContext {
 	name?: string;
 	prompt?: string; // author's scene description + instructions for the computer
+	lifeSupport?: string; // air remaining (e.g. "3 minutes 20 seconds") — player can ask
 	cameFrom?: string; // the room the player arrived from ("go back" means there)
 	exits?: { label: string; toSceneId: string; back?: boolean }[];
 	lockedExits?: { label: string; requires: string[] }[]; // sealed, player lacks the items (info only)
@@ -72,6 +73,9 @@ function sceneSection(scene: SceneContext): string {
 	return [
 		`CURRENT SCENE: ${scene.name ?? '(unnamed)'}`,
 		scene.prompt ? `SCENE NOTES: ${scene.prompt}` : '',
+		scene.lifeSupport
+			? `GUARANTEED SAFETY EXPIRES IN: ${scene.lifeSupport} — after that a fatal event is expected. If the player asks how much time they have, tell them this.`
+			: '',
 		scene.cameFrom
 			? `THE PLAYER ARRIVED HERE FROM: ${scene.cameFrom} — if they ask to "go back", that is the destination.`
 			: '',
@@ -107,7 +111,10 @@ export function buildPrompt(
 	playerMessage: string,
 	scene?: SceneContext,
 	opening = false,
-	revisit = false
+	revisit = false,
+	// A SYSTEM EVENT the computer should react to (e.g. a life-support alert) —
+	// no player line; the computer just responds in character.
+	event?: string
 ): PromptParts {
 	const outcomes = behaviour.allowedOutcomes
 		.map(
@@ -209,7 +216,14 @@ export function buildPrompt(
 					...(history.length ? ['CONVERSATION SO FAR:', transcript, ''] : []),
 					'BEGIN: open the interaction. Greet the player and set the scene in character (1–2 sentences), then await their reply. Do not take any exit or action yet.'
 				].join('\n')
-		: ['CONVERSATION SO FAR:', transcript, '', `PLAYER: ${playerMessage}`].join('\n');
+		: event
+			? [
+					'CONVERSATION SO FAR:',
+					transcript,
+					'',
+					`SYSTEM EVENT — the situation has just changed. React to it IN CHARACTER in ONE short line, addressing the player. Do NOT take any exit or action; pick the "no change" outcome. EVENT: ${event}`
+				].join('\n')
+			: ['CONVERSATION SO FAR:', transcript, '', `PLAYER: ${playerMessage}`].join('\n');
 
 	return { systemInstruction: parts.join('\n'), userPrompt };
 }

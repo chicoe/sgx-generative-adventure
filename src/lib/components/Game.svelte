@@ -312,7 +312,11 @@
 		if (pendingOpening && splashPhase === 'done' && !loading) {
 			pendingOpening = false;
 			vitalsStartedAt = Date.now(); // the countdown starts with the game itself
-			void afterEnter();
+			startVitalsTriggers(); // schedule the 2-min warning + the death event
+			// Greet, then alert the player how much life support they have.
+			void afterEnter().then(() => {
+				if (!atEnding) requestVitalsEvent('start');
+			});
 		}
 	});
 
@@ -428,7 +432,31 @@
 	let clockNow = $state(Date.now());
 	let vitalsStartedAt = $state(Date.now());
 	const VITALS_START = 80; // %
-	const VITALS_DRAIN_MS = 300_000; // depletes to 0% over 5 minutes, then "ERROR"
+	const VITALS_DRAIN_MS = 360_000; // depletes to 0% over 6 minutes, then "ERROR"
+	const VITALS_WARN_REMAINING_MS = 120_000; // warn the player when 2 minutes remain
+	const VITALS_IMMINENT_REMAINING_MS = 30_000; // "death imminent" at 30 seconds
+	// Life-support triggers (sent to the computer as system events): a start alert
+	// (X minutes left), a 2-minutes-left warning, a 30-seconds "death imminent"
+	// beat, and a death event → gameover.
+	let vitalsTimers: ReturnType<typeof setTimeout>[] = [];
+	function clearVitalsTimers() {
+		vitalsTimers.forEach(clearTimeout);
+		vitalsTimers = [];
+	}
+	function startVitalsTriggers() {
+		clearVitalsTimers();
+		vitalsTimers = [
+			setTimeout(
+				() => void requestVitalsEvent('warn'),
+				Math.max(0, VITALS_DRAIN_MS - VITALS_WARN_REMAINING_MS)
+			),
+			setTimeout(
+				() => void requestVitalsEvent('imminent'),
+				Math.max(0, VITALS_DRAIN_MS - VITALS_IMMINENT_REMAINING_MS)
+			),
+			setTimeout(() => void requestVitalsEvent('death'), VITALS_DRAIN_MS)
+		];
+	}
 
 	// A fictional off-world clock: a cycle of 20 arcs × 90 marks × 90 beats,
 	// ticking one beat per real second (numbers run past 60, so it never reads as
@@ -442,6 +470,22 @@
 	const vitalsPct = $derived(
 		Math.max(0, VITALS_START * (1 - (clockNow - vitalsStartedAt) / VITALS_DRAIN_MS))
 	);
+	// Live remaining air; the CRITICAL banner only shows inside the 2-minute mark.
+	const vitalsRemainingMs = $derived(Math.max(0, VITALS_DRAIN_MS - (clockNow - vitalsStartedAt)));
+	const vitalsCritical = $derived(
+		vitalsRemainingMs > 0 && vitalsRemainingMs <= VITALS_WARN_REMAINING_MS
+	);
+	// A human label of the air remaining, for the LLM (so the player can ask).
+	function lifeSupportLabel(): string {
+		const remaining = Math.max(0, VITALS_DRAIN_MS - (Date.now() - vitalsStartedAt));
+		if (remaining <= 0) return 'no time — guaranteed safety has already expired';
+		const total = Math.round(remaining / 1000);
+		const m = Math.floor(total / 60);
+		const s = total % 60;
+		return m > 0
+			? `${m} minute${m === 1 ? '' : 's'} ${s} second${s === 1 ? '' : 's'}`
+			: `${s} seconds`;
+	}
 
 	// Ending cinematic: an ending scene plays full-screen (only its art, drifting
 	// with parallax) while its intro text scrolls like credits, then a CRT
@@ -476,6 +520,7 @@
 	}
 	function beginEnding() {
 		clearEndTimers();
+		clearVitalsTimers(); // the run is over — no life-support death trigger
 		atEnding = true;
 		endingPhase = 'cinema';
 		endCinemaStart = Date.now();
@@ -711,6 +756,7 @@
 		return {
 			name: s.name,
 			prompt: s.prompt,
+			lifeSupport: lifeSupportLabel(), // current air remaining (player can ask)
 			cameFrom: cameFromId ? findScene(build.scenes, cameFromId)?.name : undefined,
 			// Doors are bidirectional by default. LOCKED doors never appear in `exits`
 			// (no outcome is synthesized to move through them). Sealed routes split:
@@ -797,6 +843,7 @@
 		scanTimers.forEach(clearTimeout);
 		scanning = false;
 		scanCell = -1;
+		clearVitalsTimers(); // a fresh run re-arms them when the game begins
 		vitalsStartedAt = Date.now(); // a fresh run starts at full(ish) vitals
 		enterScene(b, started.state, started.messages);
 	}
@@ -804,8 +851,12 @@
 	// History for a converse request: the most recent turns, with the intake-
 	// questionnaire turn pinned in front if slicing would have dropped it — the
 	// computer must never forget the player's answers (or that they skipped).
+	// Compare by text, not reference: `recent` holds $state proxies whose identity
+	// differs from the raw profileTurn object, so .includes() would never match.
 	function withProfile(recent: ConversationTurn[]): ConversationTurn[] {
-		return profileTurn && !recent.includes(profileTurn) ? [profileTurn, ...recent] : recent;
+		if (!profileTurn) return recent;
+		const present = recent.some((t) => t.text === profileTurn!.text);
+		return present ? recent : [profileTurn, ...recent];
 	}
 
 	initFrom(placeholderBuild);
@@ -843,6 +894,77 @@
 		} finally {
 			pending = false;
 		}
+	}
+
+	// A safety/countdown event the computer reacts to (start alert / 2-min warning
+	// / 30-second "fatal event imminent" / death). Deliberately AMBIGUOUS about the
+	// cause (the game-over can be anything). Shows a system banner + the computer's
+	// reply; on death, the player is sent to the "gameover" scene.
+	async function requestVitalsEvent(kind: 'start' | 'warn' | 'imminent' | 'death') {
+		const behaviour = activeBehaviourId
+			? build.behaviours.find((b) => b.id === activeBehaviourId)
+			: undefined;
+		if (!behaviour) return;
+		const mins = Math.round(VITALS_DRAIN_MS / 60000);
+		const eventText =
+			kind === 'start'
+				? `Safety can only be guaranteed for ${mins} minutes — after that a fatal event is expected. Warn the player.`
+				: kind === 'warn'
+					? 'Predicted survival estimate down to 2 minutes — a fatal event is expected after that. Warn the player urgently.'
+					: kind === 'imminent'
+						? 'Predicted safety expires in 30 seconds — a fatal event is imminent. Say something to the player NOW.'
+						: 'A fatal event has occurred; the player did not survive.';
+		const banner =
+			kind === 'start'
+				? `-- guaranteed safety: ${mins} min --`
+				: kind === 'warn'
+					? '-- fatal event expected in 2 min --'
+					: kind === 'imminent'
+						? '-- fatal event imminent: 30 sec --'
+						: '-- FATAL EVENT --';
+		push('system', banner);
+		pending = true;
+		try {
+			const resp = await fetch('/api/converse', {
+				method: 'POST',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify({
+					behaviourId: behaviour.id,
+					event: eventText,
+					history: withProfile(convo.slice(-MAX_HISTORY_TURNS)),
+					sceneContext: sceneContextFor(scene, game)
+				})
+			});
+			const data = await resp.json();
+			// Record the event + reply so later turns know it happened.
+			convo = [
+				...convo,
+				{ role: 'system', text: `STATE UPDATE: ${eventText}`, behaviourId: behaviour.id }
+			];
+			if (resp.ok && data.reply) {
+				push('computer', data.reply);
+				playSfx('receive');
+				convo = [...convo, { role: 'computer', text: data.reply, behaviourId: behaviour.id }];
+			}
+		} catch {
+			/* best-effort */
+		} finally {
+			pending = false;
+		}
+		if (kind === 'death') goToGameOver();
+	}
+
+	// Death: move the player to the scene with id "gameover" (if authored). If it
+	// is an ending scene, that plays the ending cinematic.
+	function goToGameOver() {
+		clearVitalsTimers();
+		const go = build.scenes.find((s) => s.id.toLowerCase() === 'gameover');
+		if (!go) return; // no gameover scene authored — nothing to navigate to
+		const prev = game.currentSceneId;
+		game = applyEffects(game, [{ type: 'goToScene', sceneId: go.id }]);
+		cameFromId = prev;
+		enterScene(build, game, []);
+		void afterEnter();
 	}
 
 	// After entering a scene: an ending scene plays the full-screen ending
@@ -1434,6 +1556,7 @@
 			splashTimers.forEach(clearTimeout);
 			scanTimers.forEach(clearTimeout);
 			endTimers.forEach(clearTimeout);
+			clearVitalsTimers();
 			stopSceneAmbient();
 			unsubLive?.();
 		};
@@ -1565,9 +1688,9 @@
 							<span class="room">{scene.name}</span>
 						</div>
 						<div class="grp right">
-							<span class="status">⚠ CRITICAL</span>
+							{#if vitalsCritical}<span class="status">⚠ CRITICAL</span>{/if}
 							<span class="vitals" class:low={vitalsPct <= 25}>
-								VITALS {vitalsPct <= 0 ? 'ERROR' : `${Math.round(vitalsPct)}%`}
+								PREDICTED SURVIVAL {vitalsPct <= 0 ? 'ERROR' : `${Math.round(vitalsPct)}%`}
 							</span>
 							<span
 								class="led {buildSource}"
@@ -2132,12 +2255,12 @@
 		filter: url(#sgx-duotone);
 	}
 	/* Semantic non-palette colours (CRITICAL red, the LED) would otherwise
-	   luminance-snap unpredictably — pull them onto the monochrome ink first. */
+	   luminance-snap unpredictably — pull them onto the monochrome ink first. The
+	   CRITICAL alarm keeps its blink (an opacity pulse is palette-safe). */
 	.content.duo .statusbar .status,
 	.content.duo .statusbar .vitals.low {
 		color: var(--ink);
 		text-shadow: none;
-		animation: none;
 	}
 	.content.duo .led {
 		background: var(--ink);

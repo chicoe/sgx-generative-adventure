@@ -28,6 +28,8 @@ const requestSchema = z.object({
 	playerMessage: z.string().min(1).max(2000).optional(),
 	opening: z.boolean().optional(),
 	revisit: z.boolean().optional(), // opening for a room the player has already been to
+	// A SYSTEM EVENT the computer reacts to (no player line; no effects applied).
+	event: z.string().min(1).max(500).optional(),
 	history: z
 		.array(
 			z.object({
@@ -43,6 +45,7 @@ const requestSchema = z.object({
 		.object({
 			name: z.string().optional(),
 			prompt: z.string().optional(),
+			lifeSupport: z.string().optional(), // air remaining (player can ask)
 			exits: z.array(z.object({ label: z.string(), toSceneId: z.string() })).optional(),
 			// Info-only: sealed routes the model may TALK about but can never take
 			// (no outcome is synthesized for them).
@@ -110,7 +113,7 @@ export const POST: RequestHandler = async ({ request }) => {
 	if (!parsed.success) error(400, 'Invalid request body');
 	const body = parsed.data;
 
-	if (!body.opening && !body.playerMessage) error(400, 'playerMessage required');
+	if (!body.opening && !body.event && !body.playerMessage) error(400, 'playerMessage required');
 
 	// Augment with synthesized outcomes: a neutral "just reply" option + one per
 	// available exit + one per giveable item (targets/items come from the scene,
@@ -150,7 +153,8 @@ export const POST: RequestHandler = async ({ request }) => {
 				body.playerMessage ?? '',
 				body.sceneContext,
 				body.opening,
-				body.revisit
+				body.revisit,
+				body.event
 			);
 			reply = res.reply || FALLBACK_REPLY;
 			outcomeId = findOutcome(behaviour, res.outcomeId)?.id ?? fallbackOutcome(behaviour).id;
@@ -163,17 +167,19 @@ export const POST: RequestHandler = async ({ request }) => {
 	}
 
 	const outcome = findOutcome(behaviour, outcomeId) ?? fallbackOutcome(behaviour);
-	// On opening the computer only greets — never apply effects. Exit outcomes
-	// apply just their goToScene (no behaviour-level granted/denied effects).
-	const appliedEffects = body.opening
-		? []
-		: isSyntheticOutcomeId(outcome.id)
-			? outcome.effects
-			: resolveEffects(behaviour, outcome);
+	// On opening OR a system event the computer only speaks — never apply effects.
+	// Exit outcomes apply just their goToScene (no behaviour-level effects).
+	const appliedEffects =
+		body.opening || body.event
+			? []
+			: isSyntheticOutcomeId(outcome.id)
+				? outcome.effects
+				: resolveEffects(behaviour, outcome);
 	const playerTurns = history.filter((t) => t.role === 'player').length + (body.opening ? 0 : 1);
-	const conversationOver = body.opening
-		? false
-		: outcome.granted || (behaviour.maxTurns ? playerTurns >= behaviour.maxTurns : false);
+	const conversationOver =
+		body.opening || body.event
+			? false
+			: outcome.granted || (behaviour.maxTurns ? playerTurns >= behaviour.maxTurns : false);
 
 	return json({
 		reply,
