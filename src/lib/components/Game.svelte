@@ -312,11 +312,9 @@
 		if (pendingOpening && splashPhase === 'done' && !loading) {
 			pendingOpening = false;
 			vitalsStartedAt = Date.now(); // the countdown starts with the game itself
-			startVitalsTriggers(); // schedule the 2-min warning + the death event
-			// Greet, then alert the player how much life support they have.
-			void afterEnter().then(() => {
-				if (!atEnding) requestVitalsEvent('start');
-			});
+			startVitalsTriggers(); // schedule the timed life-support warnings + death
+			// Just greet — no time warning yet; the first one comes at the 5-min mark.
+			void afterEnter();
 		}
 	});
 
@@ -433,11 +431,12 @@
 	let vitalsStartedAt = $state(Date.now());
 	const VITALS_START = 80; // %
 	const VITALS_DRAIN_MS = 360_000; // depletes to 0% over 6 minutes, then "ERROR"
+	const VITALS_FIRST_REMAINING_MS = 300_000; // first time warning when 5 minutes remain
 	const VITALS_WARN_REMAINING_MS = 120_000; // warn the player when 2 minutes remain
 	const VITALS_IMMINENT_REMAINING_MS = 30_000; // "death imminent" at 30 seconds
-	// Life-support triggers (sent to the computer as system events): a start alert
-	// (X minutes left), a 2-minutes-left warning, a 30-seconds "death imminent"
-	// beat, and a death event → gameover.
+	// Life-support triggers (sent to the computer as system events): a first warning
+	// at the 5-minutes-left mark, a 2-minutes-left warning, a 30-seconds "death
+	// imminent" beat, and a death event → gameover.
 	let vitalsTimers: ReturnType<typeof setTimeout>[] = [];
 	function clearVitalsTimers() {
 		vitalsTimers.forEach(clearTimeout);
@@ -446,6 +445,10 @@
 	function startVitalsTriggers() {
 		clearVitalsTimers();
 		vitalsTimers = [
+			setTimeout(
+				() => void requestVitalsEvent('first'),
+				Math.max(0, VITALS_DRAIN_MS - VITALS_FIRST_REMAINING_MS)
+			),
 			setTimeout(
 				() => void requestVitalsEvent('warn'),
 				Math.max(0, VITALS_DRAIN_MS - VITALS_WARN_REMAINING_MS)
@@ -900,23 +903,23 @@
 	// / 30-second "fatal event imminent" / death). Deliberately AMBIGUOUS about the
 	// cause (the game-over can be anything). Shows a system banner + the computer's
 	// reply; on death, the player is sent to the "gameover" scene.
-	async function requestVitalsEvent(kind: 'start' | 'warn' | 'imminent' | 'death') {
+	async function requestVitalsEvent(kind: 'first' | 'warn' | 'imminent' | 'death') {
 		const behaviour = activeBehaviourId
 			? build.behaviours.find((b) => b.id === activeBehaviourId)
 			: undefined;
 		if (!behaviour) return;
-		const mins = Math.round(VITALS_DRAIN_MS / 60000);
+		const firstMins = Math.round(VITALS_FIRST_REMAINING_MS / 60000);
 		const eventText =
-			kind === 'start'
-				? `Safety can only be guaranteed for ${mins} minutes — after that a fatal event is expected. Warn the player.`
+			kind === 'first'
+				? `Safety can only be guaranteed for about ${firstMins} more minutes — after that a fatal event is expected. Warn the player.`
 				: kind === 'warn'
 					? 'Predicted survival estimate down to 2 minutes — a fatal event is expected after that. Warn the player urgently.'
 					: kind === 'imminent'
 						? 'Predicted safety expires in 30 seconds — a fatal event is imminent. Say something to the player NOW.'
 						: 'A fatal event has occurred; the player did not survive.';
 		const banner =
-			kind === 'start'
-				? `-- guaranteed safety: ${mins} min --`
+			kind === 'first'
+				? `-- guaranteed safety: ${firstMins} min --`
 				: kind === 'warn'
 					? '-- fatal event expected in 2 min --'
 					: kind === 'imminent'
