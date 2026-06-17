@@ -2119,7 +2119,7 @@
 		flex-direction: column;
 		align-items: center;
 		justify-content: center;
-		gap: 0; /* the two lines sit right after each other */
+		gap: 0.4em; /* normal line spacing, as if they were two consecutive lines */
 		text-align: center;
 		padding: 1rem;
 	}
@@ -2153,7 +2153,7 @@
 	}
 	.ending-wait span {
 		font-family: var(--font-terminal);
-		font-size: 1rem;
+		font-size: 1.3rem; /* match the ending message lines */
 		letter-spacing: 0.2em;
 		color: var(--ink-dim);
 		text-shadow: var(--glow);
