@@ -1378,17 +1378,33 @@
 
 	let transcriptEl = $state<HTMLDivElement>();
 	// Old-OS scrollbar metrics (thumb size + position track the transcript).
+	const SB_MIN_THUMB_PX = 16; // matches .sb-thumb min-height — keep the two in sync
 	let scTop = $state(0);
 	let scHeight = $state(0);
 	let scClient = $state(0);
+	let scTrack = $state(0); // the track's pixel height (for the min-thumb floor)
 	function syncScroll() {
 		if (!transcriptEl) return;
 		scTop = transcriptEl.scrollTop;
 		scHeight = transcriptEl.scrollHeight;
 		scClient = transcriptEl.clientHeight;
+		if (sbTrackEl) scTrack = sbTrackEl.clientHeight;
 	}
-	const sbThumbPct = $derived(scHeight > 0 ? Math.min(1, scClient / scHeight) : 1);
-	const sbThumbTopPct = $derived(scHeight > scClient ? scTop / scHeight : 0);
+	// Thumb height as a fraction of the track, floored at SB_MIN_THUMB_PX so it
+	// stays grabbable when the log is very long.
+	const sbThumbPct = $derived.by(() => {
+		if (scHeight <= scClient || scHeight <= 0) return 1; // no overflow → full thumb
+		const raw = scClient / scHeight;
+		const minFrac = scTrack > 0 ? SB_MIN_THUMB_PX / scTrack : raw;
+		return Math.min(1, Math.max(raw, minFrac));
+	});
+	// Position the thumb over the REMAINING track (1 − thumbHeight) so top+height
+	// can never exceed 100% — otherwise the floored thumb overflows past the track.
+	const sbThumbTopPct = $derived.by(() => {
+		if (scHeight <= scClient) return 0;
+		const progress = Math.max(0, Math.min(1, scTop / (scHeight - scClient)));
+		return progress * (1 - sbThumbPct);
+	});
 	$effect(() => {
 		if (lines.length && transcriptEl) transcriptEl.scrollTop = transcriptEl.scrollHeight;
 		syncScroll();
