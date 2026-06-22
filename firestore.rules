@@ -63,6 +63,19 @@ service cloud.firestore {
         );
     }
 
+    // Room-entry stats: one counter doc per scene. Editors read/reset; players
+    // (no auth) may ONLY create a counter at 1 or bump an existing one by exactly
+    // one — no other field, no arbitrary values.
+    match /roomStats/{sceneId} {
+      allow read, delete: if isEditor();
+      allow create: if request.resource.data.keys().hasOnly(['sceneId', 'count'])
+        && request.resource.data.sceneId == sceneId
+        && request.resource.data.count == 1;
+      allow update: if request.resource.data.keys().hasOnly(['sceneId', 'count'])
+        && request.resource.data.sceneId == sceneId
+        && request.resource.data.count == resource.data.count + 1;
+    }
+
     // Deny everything else.
     match /{document=**} {
       allow read, write: if false;

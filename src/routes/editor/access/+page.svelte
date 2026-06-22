@@ -7,6 +7,9 @@
 		generateUniqueCode,
 		type AccessCode
 	} from '$lib/content/accessCodes';
+	import { loadRoomStats, type RoomStat } from '$lib/content/roomStats';
+	import { loadActiveBuild } from '$lib/content/loader';
+	import type { Scene } from '$lib/engine/types';
 
 	let codes = $state<AccessCode[]>([]);
 	let newCode = $state('');
@@ -14,14 +17,50 @@
 	let busy = $state(false);
 	let message = $state('');
 
+	// Stats: room-entry counters + the live build's scenes (for names + which are
+	// endings). Resolved against the ACTIVE build so labels match what players ran.
+	let stats = $state<RoomStat[]>([]);
+	let scenes = $state<Scene[]>([]);
+
 	async function refresh() {
 		codes = await listAccessCodes();
+	}
+	async function refreshStats() {
+		const [s, loaded] = await Promise.all([loadRoomStats(), loadActiveBuild()]);
+		stats = s;
+		scenes = loaded.build.scenes;
 	}
 	onMount(() =>
 		refresh()
 			.then(() => suggest())
+			.then(() => refreshStats())
 			.catch((e) => (message = String(e)))
 	);
+
+	// sceneId → entry count.
+	const countById = $derived<Record<string, number>>(
+		Object.fromEntries(stats.map((s) => [s.sceneId, s.count]))
+	);
+	// Ending scenes with their reached-count (0 if never), most-reached first.
+	const endingRows = $derived(
+		scenes
+			.filter((s) => s.ending)
+			.map((s) => ({ id: s.id, label: s.name || s.id, count: countById[s.id] ?? 0 }))
+			.sort((a, b) => b.count - a.count)
+	);
+	// Non-ending rooms + any orphan counters (scene since removed from the build).
+	const roomRows = $derived.by(() => {
+		const inBuild = new Set(scenes.map((s) => s.id));
+		const rows = scenes
+			.filter((s) => !s.ending)
+			.map((s) => ({ id: s.id, label: s.name || s.id, count: countById[s.id] ?? 0 }));
+		for (const st of stats)
+			if (!inBuild.has(st.sceneId))
+				rows.push({ id: st.sceneId, label: `${st.sceneId} (removed)`, count: st.count });
+		return rows.sort((a, b) => b.count - a.count);
+	});
+	const maxRoom = $derived(Math.max(1, ...roomRows.map((r) => r.count)));
+	const maxEnding = $derived(Math.max(1, ...endingRows.map((r) => r.count)));
 
 	// Pre-fill a fresh random code (the editor can overwrite it before creating).
 	function suggest() {
@@ -85,27 +124,63 @@
 	>
 </div>
 
-<table>
-	<thead>
-		<tr><th>Code</th><th>Lives left</th><th>Created</th><th></th></tr>
-	</thead>
-	<tbody>
-		{#each codes as c (c.code)}
-			<tr class:dead={c.lives <= 0}>
-				<td class="code">{c.code}</td>
-				<td>{c.lives} / {c.livesTotal}</td>
-				<td class="muted">{new Date(c.createdAt).toLocaleString()}</td>
-				<td
-					><button type="button" class="del" onclick={() => remove(c.code)} disabled={busy}
-						>delete</button
-					></td
-				>
-			</tr>
-		{:else}
-			<tr><td colspan="4" class="muted">No codes yet.</td></tr>
+<div class="codes-scroll">
+	<table>
+		<thead>
+			<tr><th>Code</th><th>Lives left</th><th>Created</th><th></th></tr>
+		</thead>
+		<tbody>
+			{#each codes as c (c.code)}
+				<tr class:dead={c.lives <= 0}>
+					<td class="code">{c.code}</td>
+					<td>{c.lives} / {c.livesTotal}</td>
+					<td class="muted">{new Date(c.createdAt).toLocaleString()}</td>
+					<td
+						><button type="button" class="del" onclick={() => remove(c.code)} disabled={busy}
+							>delete</button
+						></td
+					>
+				</tr>
+			{:else}
+				<tr><td colspan="4" class="muted">No codes yet.</td></tr>
+			{/each}
+		</tbody>
+	</table>
+</div>
+
+<h2>Endings reached</h2>
+{#if endingRows.length}
+	<div class="bars">
+		{#each endingRows as r (r.id)}
+			<div class="bar-row">
+				<span class="bar-label" title={r.label}>{r.label}</span>
+				<span class="bar-track">
+					<span class="bar-fill" style:width={`${(r.count / maxEnding) * 100}%`}></span>
+				</span>
+				<span class="bar-count">{r.count}</span>
+			</div>
 		{/each}
-	</tbody>
-</table>
+	</div>
+{:else}
+	<p class="muted">No ending scenes in the active build.</p>
+{/if}
+
+<h2>Rooms entered</h2>
+{#if roomRows.length}
+	<div class="bars">
+		{#each roomRows as r (r.id)}
+			<div class="bar-row">
+				<span class="bar-label" title={r.label}>{r.label}</span>
+				<span class="bar-track">
+					<span class="bar-fill" style:width={`${(r.count / maxRoom) * 100}%`}></span>
+				</span>
+				<span class="bar-count">{r.count}</span>
+			</div>
+		{/each}
+	</div>
+{:else}
+	<p class="muted">No room entries logged yet.</p>
+{/if}
 
 <style>
 	h1 {
@@ -170,6 +245,12 @@
 	.del {
 		color: #e0a8a8;
 	}
+	/* The codes list takes at most half the viewport, then scrolls. */
+	.codes-scroll {
+		max-height: 50vh;
+		overflow: auto;
+		border-bottom: 1px solid var(--line);
+	}
 	table {
 		width: 100%;
 		border-collapse: collapse;
@@ -185,6 +266,52 @@
 		color: var(--ink-dim);
 		font-weight: normal;
 		font-size: 0.78rem;
+		/* Keep the header visible while the (capped) list scrolls. */
+		position: sticky;
+		top: 0;
+		background: var(--bg);
+	}
+	h2 {
+		margin: 1.5rem 0 0.6rem;
+		font-size: 1rem;
+		color: var(--ink-dim);
+		font-weight: normal;
+		letter-spacing: 0.08em;
+	}
+	/* Horizontal bar graph: label · proportional bar · count. */
+	.bars {
+		display: flex;
+		flex-direction: column;
+		gap: 0.35rem;
+		max-width: 48rem;
+	}
+	.bar-row {
+		display: grid;
+		grid-template-columns: 12rem 1fr 3rem;
+		align-items: center;
+		gap: 0.6rem;
+		font-size: 0.85rem;
+	}
+	.bar-label {
+		color: var(--ink);
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+	.bar-track {
+		height: 1rem;
+		background: #0c0e11;
+		border: 1px solid var(--line);
+	}
+	.bar-fill {
+		display: block;
+		height: 100%;
+		background: var(--accent);
+	}
+	.bar-count {
+		text-align: right;
+		color: var(--ink-dim);
+		font-variant-numeric: tabular-nums;
 	}
 	.code {
 		font-family: var(--font-terminal, monospace);
