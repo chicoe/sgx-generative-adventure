@@ -76,6 +76,19 @@ service cloud.firestore {
         && request.resource.data.count == resource.data.count + 1;
     }
 
+    // Per-(code, ending) tally: one counter doc per access code + ending scene.
+    // Same public contract as roomStats — create at 1, or bump by exactly one,
+    // with the code/sceneId fields unchanged.
+    match /endingStats/{id} {
+      allow read, delete: if isEditor();
+      allow create: if request.resource.data.keys().hasOnly(['code', 'sceneId', 'count'])
+        && request.resource.data.count == 1;
+      allow update: if request.resource.data.keys().hasOnly(['code', 'sceneId', 'count'])
+        && request.resource.data.count == resource.data.count + 1
+        && request.resource.data.code == resource.data.code
+        && request.resource.data.sceneId == resource.data.sceneId;
+    }
+
     // Deny everything else.
     match /{document=**} {
       allow read, write: if false;
