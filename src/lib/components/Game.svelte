@@ -494,7 +494,8 @@
 	// with parallax) while its intro text scrolls like credits, then a CRT
 	// power-off, then a dark transition message, then "press any key to start".
 	let atEnding = $state(false);
-	let endingPhase = $state<'cinema' | 'tvoff' | 'message' | 'wait' | null>(null);
+	// 'prep' = brief black hold while the computer chooses the ending background.
+	let endingPhase = $state<'prep' | 'cinema' | 'tvoff' | 'message' | 'wait' | null>(null);
 	// The transition message shown on the dark screen after the power-off.
 	const ENDING_MESSAGE_LINE_1 = 'One story ends here';
 	const ENDING_MESSAGE_LINE_2 = 'Another one is about to begin';
@@ -511,6 +512,28 @@
 	// The credits text for THIS run — one variant, picked once when the ending
 	// starts (the scene's intro text may hold several, split by a "---" line).
 	let endingText = $state('');
+	// The background image the computer chose for THIS ending (from the scene's
+	// tagged candidates, matched to the player). null = none picked / no candidates.
+	let endingBg = $state<string | null>(null);
+	let cinemaStarted = false; // guards the cinema starting twice (choice vs timeout)
+	const ENDING_PREP_TIMEOUT_MS = 6000; // max black hold while the LLM picks the image
+	// What the ending cinematic renders: the chosen background as a single drifting
+	// layer when one was picked, else the ending scene's own authored art.
+	const endRenderScene = $derived.by(() => {
+		const s = findScene(build.scenes, game.currentSceneId);
+		if (!endingBg) return s;
+		const synthetic: Scene = {
+			id: '__ending__',
+			name: s?.name ?? '',
+			layers: [
+				{ id: '__bg__', imagePath: endingBg, imagePaths: [endingBg], z: 0, parallaxFactor: 0.25 }
+			],
+			filter: s?.filter,
+			hotspots: [],
+			exits: []
+		};
+		return synthetic;
+	});
 
 	function clearEndTimers() {
 		endTimers.forEach(clearTimeout);
@@ -525,14 +548,58 @@
 		clearEndTimers();
 		clearVitalsTimers(); // the run is over — no life-support death trigger
 		atEnding = true;
+		endingBg = null;
+		cinemaStarted = false;
+		const s = findScene(build.scenes, game.currentSceneId);
+		endingText = pickTextVariant(s?.introText);
+		const candidates = s?.endingBackgrounds ?? [];
+		if (s && candidates.length) {
+			// Let the computer pick the ending image that fits this player; hold a brief
+			// black "prep" screen so the chosen art is ready when the cinema fades in.
+			// A timeout starts the cinema anyway if the choice is slow.
+			endingPhase = 'prep';
+			endTimers = [setTimeout(startEndingCinema, ENDING_PREP_TIMEOUT_MS)];
+			void chooseEndingBg(s, candidates).then(startEndingCinema);
+		} else {
+			startEndingCinema();
+		}
+	}
+	// Begin the full-screen cinema (pan + credits) and arm the phase timers. Guarded
+	// so the choice resolving and the prep-timeout can't both start it.
+	function startEndingCinema() {
+		if (cinemaStarted) return;
+		cinemaStarted = true;
+		clearEndTimers(); // cancel the prep-timeout if it is still pending
 		endingPhase = 'cinema';
 		endCinemaStart = Date.now();
-		endingText = pickTextVariant(findScene(build.scenes, game.currentSceneId)?.introText);
 		endTimers = [
 			setTimeout(enterTvOff, ENDING_CINEMA_MS),
 			setTimeout(showEndMessage, ENDING_CINEMA_MS + ENDING_TVOFF_MS),
 			setTimeout(showEndWait, ENDING_CINEMA_MS + ENDING_TVOFF_MS + ENDING_MESSAGE_MS)
 		];
+	}
+	// Ask the computer to pick the ending image that best fits this player from the
+	// scene's tagged candidates. Falls back to the first candidate on any failure.
+	async function chooseEndingBg(s: Scene, candidates: NonNullable<Scene['endingBackgrounds']>) {
+		let src = candidates[0].src;
+		try {
+			const resp = await fetch('/api/choose-ending', {
+				method: 'POST',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify({
+					options: candidates.map((c) => ({ id: c.id, tags: c.tags, description: c.description })),
+					sceneName: s.name,
+					scenePrompt: s.prompt,
+					history: withProfile(convo.slice(-MAX_HISTORY_TURNS))
+				})
+			});
+			const data = await resp.json();
+			const chosen = candidates.find((c) => c.id === data?.chosenId);
+			if (chosen) src = chosen.src;
+		} catch {
+			/* keep the first candidate */
+		}
+		endingBg = src;
 	}
 	function showEndMessage() {
 		// Dark screen with the two transition messages (in-frame, so the CRT
@@ -1642,10 +1709,10 @@
 		</svg>
 		<div class="frame" style={frameStyle}>
 			{#if atEnding}
-				{@const endScene = findScene(build.scenes, game.currentSceneId)}
 				<!-- Ending cinematic: full-screen scene art (drifting with parallax) +
-				     credits scroll, then a CRT power-off. Same duotone filter as the
-				     normal content so the art stays on-palette. -->
+				     credits scroll, then a CRT power-off. The background is the computer's
+				     chosen candidate (endRenderScene) when there is one, else the scene's
+				     own art. Same duotone filter as the normal content (on-palette). -->
 				<div class="endwrap" class:duo={display.mode !== 'full'}>
 					{#if endingPhase === 'message'}
 						<!-- Dark transition screen: two lines fade in (the second a beat
@@ -1658,11 +1725,14 @@
 						<!-- The "press any key to start" prompt fades in; a key boots the
 						     next cycle (in-frame, so the CRT overlay applies). -->
 						<div class="ending-wait"><span>press any key to start</span></div>
+					{:else if endingPhase === 'prep'}
+						<!-- Brief black hold while the computer chooses the ending image. -->
+						<div class="ending-prep"></div>
 					{:else}
 						<div class="ending-scene" class:tvoff={endingPhase === 'tvoff'}>
 							<div class="ending-art" style:animation-duration={`${ENDING_CINEMA_MS}ms`}>
-								{#if endScene && sceneHasArt(endScene)}
-									<SceneRenderer scene={endScene} {look} picks={artPicks} amp={ENDING_AMP} />
+								{#if endRenderScene && sceneHasArt(endRenderScene)}
+									<SceneRenderer scene={endRenderScene} {look} picks={artPicks} amp={ENDING_AMP} />
 								{:else}
 									<div class="nosignal" aria-label="no signal">
 										<div class="static"></div>
@@ -2104,6 +2174,12 @@
 	.endwrap.duo {
 		background: #000;
 		filter: url(#sgx-duotone);
+	}
+	/* The brief "choosing the ending image" hold: full-bleed, the endwrap's dark
+	   background shows through (the screen warming up before the reveal). */
+	.ending-prep {
+		position: absolute;
+		inset: 0;
 	}
 	.ending-scene {
 		position: absolute;

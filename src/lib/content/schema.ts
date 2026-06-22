@@ -42,6 +42,13 @@ export const sceneLayerSchema = z.object({
 	parallaxFactor: z.number()
 });
 
+export const endingBackgroundSchema = z.object({
+	id: z.string().min(1),
+	src: z.string().min(1),
+	tags: z.array(z.string()),
+	description: z.string().optional()
+});
+
 export const hotspotSchema = z.object({
 	id: z.string().min(1),
 	label: z.string(),
@@ -78,7 +85,8 @@ export const sceneSchema = z.object({
 	giveableItems: z.array(giveableItemSchema).optional(),
 	ambientSound: z.string().optional(),
 	start: z.boolean().optional(),
-	ending: z.boolean().optional()
+	ending: z.boolean().optional(),
+	endingBackgrounds: z.array(endingBackgroundSchema).optional()
 });
 
 export const itemSchema = z.object({

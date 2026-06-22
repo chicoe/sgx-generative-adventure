@@ -11,6 +11,13 @@ import { env } from '$env/dynamic/private';
 import type { ConversationTurn, LLMBehaviour } from '../engine/types';
 import { buildPrompt, type SceneContext } from './prompt';
 import { llmResponseSchema, type LlmResponse } from './outcome';
+import {
+	buildEndingChoicePrompt,
+	endingChoiceResponseSchema,
+	type EndingOption,
+	type EndingChoiceContext,
+	type EndingChoiceResponse
+} from './endingChoice';
 
 const TIMEOUT_MS = 12000;
 const MAX_ATTEMPTS = 2; // one retry on transient failure before the fallback
@@ -108,6 +115,62 @@ export async function generateLlmResponse(
 			const text = res.text;
 			if (!text) throw new Error('Empty response from Gemini');
 			return llmResponseSchema.parse(JSON.parse(stripFences(text)));
+		} catch (err) {
+			lastErr = err;
+			if (attempt < MAX_ATTEMPTS) await new Promise((r) => setTimeout(r, 400));
+		}
+	}
+	throw lastErr;
+}
+
+function endingChoiceSchema(ids: string[]): Schema {
+	return {
+		type: Type.OBJECT,
+		properties: {
+			chosenId: { type: Type.STRING, enum: ids },
+			reasoning: { type: Type.STRING }
+		},
+		required: ['chosenId'],
+		propertyOrdering: ['chosenId', 'reasoning']
+	};
+}
+
+/**
+ * Ask the model to pick the ending background that best fits the player, from a
+ * scene's tagged candidates. The chosenId is constrained to the candidate ids.
+ * Throws on missing config / timeout / transport / schema-invalid output — the
+ * endpoint converts that into a deterministic fallback (the first candidate).
+ */
+export async function chooseEndingBackground(
+	options: EndingOption[],
+	ctx: EndingChoiceContext,
+	history: ConversationTurn[]
+): Promise<EndingChoiceResponse> {
+	const backend = selectBackend();
+	if (!backend) throw new Error('Gemini is not configured');
+
+	const ai = makeClient(backend);
+	const model = env.GEMINI_MODEL || DEFAULT_MODEL;
+	const { systemInstruction, userPrompt } = buildEndingChoicePrompt(options, ctx, history);
+	const config = {
+		systemInstruction,
+		responseMimeType: 'application/json',
+		responseSchema: endingChoiceSchema(options.map((o) => o.id)),
+		temperature: 0.7,
+		...(model.includes('flash') ? { thinkingConfig: { thinkingBudget: 0 } } : {})
+	};
+
+	let lastErr: unknown;
+	for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+		try {
+			const res = await ai.models.generateContent({
+				model,
+				contents: userPrompt,
+				config: { ...config, abortSignal: AbortSignal.timeout(TIMEOUT_MS) }
+			});
+			const text = res.text;
+			if (!text) throw new Error('Empty response from Gemini');
+			return endingChoiceResponseSchema.parse(JSON.parse(stripFences(text)));
 		} catch (err) {
 			lastErr = err;
 			if (attempt < MAX_ATTEMPTS) await new Promise((r) => setTimeout(r, 400));

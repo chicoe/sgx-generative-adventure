@@ -23,6 +23,8 @@ export function collectBuildAssets(build: Build): string[] {
 	for (const scene of build.scenes) {
 		for (const layer of scene.layers) for (const img of layerImagePool(layer)) urls.add(img);
 		if (scene.ambientSound?.trim()) urls.add(scene.ambientSound);
+		if (scene.endingBackgrounds)
+			for (const eb of scene.endingBackgrounds) if (eb.src?.trim()) urls.add(eb.src);
 	}
 	for (const item of build.items) if (item.iconPath?.trim()) urls.add(item.iconPath);
 	return [...urls].map(resolveUrl).filter(Boolean);

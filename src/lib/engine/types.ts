@@ -67,6 +67,17 @@ export interface GiveableItem {
 	chance: number;
 }
 
+// A candidate background for an ending scene. When an ending scene has any of
+// these, the computer picks the ONE whose tags/description best fit the player
+// (from the intake interview + conversation) and shows it during the cinematic,
+// instead of the scene's authored art. Authored per ending scene in the editor.
+export interface EndingBackground {
+	id: string;
+	src: string; // image URL (Storage download URL or path)
+	tags: string[]; // matching cues, e.g. ['crowded', 'warm', 'city']
+	description?: string; // optional richer description for the model
+}
+
 // CSS grade applied over the layer stack (SPEC §6). Author-configurable.
 export interface FilterSpec {
 	// Raw CSS `filter` value, e.g. 'contrast(1.1) saturate(0.8) hue-rotate(8deg)'.
@@ -92,6 +103,9 @@ export interface Scene {
 	ambientSound?: string; // looped background audio (URL) played quietly on enter
 	start?: boolean; // a possible starting scene — one is chosen at random per run
 	ending?: boolean; // reaching it ends the run (then auto/interaction restart)
+	// Ending scenes only: tagged candidate backgrounds the computer chooses from to
+	// match the player. When present, one replaces the cinematic background art.
+	endingBackgrounds?: EndingBackground[];
 }
 
 // ---------------------------------------------------------------------------
