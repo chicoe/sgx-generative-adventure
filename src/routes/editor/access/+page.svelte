@@ -7,7 +7,12 @@
 		generateUniqueCode,
 		type AccessCode
 	} from '$lib/content/accessCodes';
-	import { loadRoomStats, type RoomStat } from '$lib/content/roomStats';
+	import {
+		loadRoomStats,
+		loadEndingStats,
+		type RoomStat,
+		type EndingStat
+	} from '$lib/content/roomStats';
 	import { loadActiveBuild } from '$lib/content/loader';
 	import type { Scene } from '$lib/engine/types';
 
@@ -20,14 +25,20 @@
 	// Stats: room-entry counters + the live build's scenes (for names + which are
 	// endings). Resolved against the ACTIVE build so labels match what players ran.
 	let stats = $state<RoomStat[]>([]);
+	let endingStats = $state<EndingStat[]>([]);
 	let scenes = $state<Scene[]>([]);
 
 	async function refresh() {
 		codes = await listAccessCodes();
 	}
 	async function refreshStats() {
-		const [s, loaded] = await Promise.all([loadRoomStats(), loadActiveBuild()]);
+		const [s, es, loaded] = await Promise.all([
+			loadRoomStats(),
+			loadEndingStats(),
+			loadActiveBuild()
+		]);
 		stats = s;
+		endingStats = es;
 		scenes = loaded.build.scenes;
 	}
 	onMount(() =>
@@ -59,8 +70,26 @@
 				rows.push({ id: st.sceneId, label: `${st.sceneId} (removed)`, count: st.count });
 		return rows.sort((a, b) => b.count - a.count);
 	});
-	const maxRoom = $derived(Math.max(1, ...roomRows.map((r) => r.count)));
-	const maxEnding = $derived(Math.max(1, ...endingRows.map((r) => r.count)));
+	// One shared scale across BOTH graphs (endings + rooms) so bar lengths are
+	// directly comparable — the largest count anywhere is the full-width bar.
+	const maxCount = $derived(
+		Math.max(1, ...roomRows.map((r) => r.count), ...endingRows.map((r) => r.count))
+	);
+
+	// code → (sceneId → count) for the per-code ending breakdown shown on each row.
+	const endingByCode = $derived.by(() => {
+		const m: Record<string, Record<string, number>> = {};
+		for (const e of endingStats) (m[e.code] ??= {})[e.sceneId] = e.count;
+		return m;
+	});
+	// For a code: the ending scenes it reached (count > 0), labelled, most first.
+	function endingsForCode(code: string) {
+		const m = endingByCode[code] ?? {};
+		return endingRows
+			.map((r) => ({ id: r.id, label: r.label, count: m[r.id] ?? 0 }))
+			.filter((r) => r.count > 0)
+			.sort((a, b) => b.count - a.count);
+	}
 
 	// Pre-fill a fresh random code (the editor can overwrite it before creating).
 	function suggest() {
@@ -127,13 +156,22 @@
 <div class="codes-scroll">
 	<table>
 		<thead>
-			<tr><th>Code</th><th>Lives left</th><th>Created</th><th></th></tr>
+			<tr><th>Code</th><th>Lives left</th><th>Endings reached</th><th>Created</th><th></th></tr>
 		</thead>
 		<tbody>
 			{#each codes as c (c.code)}
 				<tr class:dead={c.lives <= 0}>
 					<td class="code">{c.code}</td>
 					<td>{c.lives} / {c.livesTotal}</td>
+					<td>
+						<div class="endings">
+							{#each endingsForCode(c.code) as e (e.id)}
+								<span class="chip">{e.label} ×{e.count}</span>
+							{:else}
+								<span class="muted">—</span>
+							{/each}
+						</div>
+					</td>
 					<td class="muted">{new Date(c.createdAt).toLocaleString()}</td>
 					<td
 						><button type="button" class="del" onclick={() => remove(c.code)} disabled={busy}
@@ -142,7 +180,7 @@
 					>
 				</tr>
 			{:else}
-				<tr><td colspan="4" class="muted">No codes yet.</td></tr>
+				<tr><td colspan="5" class="muted">No codes yet.</td></tr>
 			{/each}
 		</tbody>
 	</table>
@@ -155,7 +193,7 @@
 			<div class="bar-row">
 				<span class="bar-label" title={r.label}>{r.label}</span>
 				<span class="bar-track">
-					<span class="bar-fill" style:width={`${(r.count / maxEnding) * 100}%`}></span>
+					<span class="bar-fill" style:width={`${(r.count / maxCount) * 100}%`}></span>
 				</span>
 				<span class="bar-count">{r.count}</span>
 			</div>
@@ -172,7 +210,7 @@
 			<div class="bar-row">
 				<span class="bar-label" title={r.label}>{r.label}</span>
 				<span class="bar-track">
-					<span class="bar-fill" style:width={`${(r.count / maxRoom) * 100}%`}></span>
+					<span class="bar-fill" style:width={`${(r.count / maxCount) * 100}%`}></span>
 				</span>
 				<span class="bar-count">{r.count}</span>
 			</div>
@@ -320,5 +358,20 @@
 	tr.dead .code {
 		color: var(--ink-dim);
 		text-decoration: line-through;
+	}
+	/* Per-code ending breakdown: small inline chips on the code's row. */
+	.endings {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.3rem;
+	}
+	.chip {
+		font-size: 0.72rem;
+		color: var(--ink);
+		background: #0c0e11;
+		border: 1px solid var(--line);
+		border-radius: 2px;
+		padding: 0.05rem 0.35rem;
+		white-space: nowrap;
 	}
 </style>

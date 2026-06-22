@@ -20,7 +20,7 @@
 	import { audioUnlocked, playSfx, playDrone } from '$lib/sfx';
 	import { pickTextVariant } from '$lib/text';
 	import { spendAccessLife, checkAccessCode } from '$lib/content/accessCodes';
-	import { logRoomEntry } from '$lib/content/roomStats';
+	import { logRoomEntry, logEndingForCode } from '$lib/content/roomStats';
 	import { collectBuildAssets, preloadAssets } from '$lib/content/preload';
 	import { DEFAULT_DISPLAY, themeStyle, duotoneTable, crtBackground } from '$lib/theme';
 	import type { Build, ConversationTurn, Effect, GameState, Item, Scene } from '$lib/engine/types';
@@ -937,8 +937,12 @@
 	function enterScene(b: Build, state: GameState, narration: string[]) {
 		const s = findScene(b.scenes, state.currentSceneId);
 		// Stats: log this room entry — only for REAL published runs (skip the
-		// placeholder build and the editor's draft testplay).
-		if (buildSource === 'firestore' && s) void logRoomEntry(state.currentSceneId);
+		// placeholder build and the editor's draft testplay). For coded runs, also
+		// tally each ending reached against the access code.
+		if (buildSource === 'firestore' && s) {
+			void logRoomEntry(state.currentSceneId);
+			if (s.ending && accessCode) void logEndingForCode(accessCode, state.currentSceneId);
+		}
 		presentGiveables = s ? rollGiveableItems(s) : [];
 		for (const t of narration) push('narration', t);
 		// Intro text may hold several variants (split by a "---" line) — show one.
