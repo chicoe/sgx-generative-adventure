@@ -17,13 +17,16 @@
 		const code = p.get('code')?.trim().toUpperCase() || undefined;
 		const special = p.get('specialaccess') === 'sgx';
 		const kiosk = p.has('kiosk');
-		if (!code && !special && !kiosk) {
-			// No way in — send them to the access-code prompt.
-			goto(resolve('/'));
+		// A code is required even in kiosk mode — only ?specialaccess=sgx skips it.
+		if (!code && !special) {
+			// Send them to the access-code prompt; keep the kiosk tag so the gate
+			// hands it back to /play and preloading still runs after the code.
+			// eslint-disable-next-line svelte/no-navigation-without-resolve
+			goto(kiosk ? `${resolve('/')}?kiosk=1` : resolve('/'));
 			return;
 		}
-		// specialaccess / kiosk play freely (no code to spend).
-		accessCode = special || kiosk ? undefined : code;
+		// specialaccess plays freely (no code to spend); everyone else spends a life.
+		accessCode = special ? undefined : code;
 		ready = true;
 	});
 </script>

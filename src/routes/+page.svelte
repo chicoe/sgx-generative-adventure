@@ -4,7 +4,7 @@
 	import { resolve } from '$app/paths';
 	import { checkAccessCode } from '$lib/content/accessCodes';
 	import { loadActiveBuild } from '$lib/content/loader';
-	import { DEFAULT_DISPLAY, themeStyle } from '$lib/theme';
+	import { DEFAULT_DISPLAY, themeStyle, crtBackground } from '$lib/theme';
 	import type { DisplaySettings } from '$lib/engine/types';
 
 	let code = $state('');
@@ -13,23 +13,50 @@
 	// Match the gate to the published build's UI colour. null until loaded (the
 	// form is held back so it never flashes the default amber palette first).
 	let display = $state<DisplaySettings | null>(null);
-	onMount(async () => {
-		try {
-			const { build, source } = await loadActiveBuild();
-			// If the gate is amber but the game is green, watch this log: source
-			// 'placeholder' means no published build was read (the gate falls back to
-			// the amber default); 'firestore' with an amber palette means the PUBLISHED
-			// build is amber (publish the green settings to update it).
-			console.info(`[gate] build source=${source}, ui=${build.meta.display?.ui ?? '(default)'}`);
-			display = build.meta.display ?? DEFAULT_DISPLAY;
-		} catch (e) {
-			console.warn('[gate] could not load build palette; using default:', e);
-			display = DEFAULT_DISPLAY;
-		}
+	onMount(() => {
+		(async () => {
+			try {
+				const { build, source } = await loadActiveBuild();
+				// If the gate is amber but the game is green, watch this log: source
+				// 'placeholder' means no published build was read (the gate falls back to
+				// the amber default); 'firestore' with an amber palette means the PUBLISHED
+				// build is amber (publish the green settings to update it).
+				console.info(`[gate] build source=${source}, ui=${build.meta.display?.ui ?? '(default)'}`);
+				display = build.meta.display ?? DEFAULT_DISPLAY;
+			} catch (e) {
+				console.warn('[gate] could not load build palette; using default:', e);
+				display = DEFAULT_DISPLAY;
+			}
+		})();
+		computeScale();
+		window.addEventListener('resize', computeScale);
+		return () => window.removeEventListener('resize', computeScale);
 	});
-	// The gate has no duotone SVG filter, so render the two chosen colours as a
-	// straight full-colour palette (ui → ink) regardless of the build's mode.
-	const gateStyle = $derived(themeStyle({ ...(display ?? DEFAULT_DISPLAY), mode: 'full' }));
+
+	// Render the same framed window as the game: a backdrop-coloured letterbox with
+	// a centered frame at the build's resolution (scaled to fit, never up past 1:1),
+	// the palette bg inside, and the CRT overlay on top. The gate has no duotone SVG
+	// filter, so the palette is rendered as straight full colour (ui → ink).
+	const d = $derived(display ?? DEFAULT_DISPLAY);
+	const backdrop = $derived(d.backdrop ?? '#000000');
+	const crtBg = $derived(crtBackground(d.crt));
+	let scale = $state(1);
+	function computeScale() {
+		const dd = display ?? DEFAULT_DISPLAY;
+		scale = Math.min(1, window.innerWidth / dd.width, window.innerHeight / dd.height);
+	}
+	// Refit once the live build's resolution loads.
+	$effect(() => {
+		void [d.width, d.height];
+		computeScale();
+	});
+	const framePlacement = $derived(
+		`width:${d.width}px;height:${d.height}px;left:50%;top:50%;` +
+			`transform:translate(calc(-50% + ${d.offsetX ?? 0}px), calc(-50% + ${d.offsetY ?? 0}px)) scale(${scale});transform-origin:center`
+	);
+	const frameStyle = $derived(
+		`${themeStyle({ ...d, mode: 'full' })};background:${d.bg};${framePlacement}`
+	);
 
 	async function submit(e: SubmitEvent) {
 		e.preventDefault();
@@ -43,8 +70,10 @@
 		const res = await checkAccessCode(c);
 		busy = false;
 		if (res.ok) {
+			// Carry the kiosk tag through so /play resumes up-front preloading.
+			const kiosk = new URLSearchParams(window.location.search).has('kiosk');
 			// eslint-disable-next-line svelte/no-navigation-without-resolve
-			goto(`${resolve('/play')}?code=${encodeURIComponent(c)}`);
+			goto(`${resolve('/play')}?code=${encodeURIComponent(c)}${kiosk ? '&kiosk=1' : ''}`);
 		} else if (res.reason === 'depleted') {
 			error = 'That code has no plays left.';
 		} else if (res.reason === 'unknown') {
@@ -57,36 +86,77 @@
 
 <svelte:head><title>Adventure Engine</title></svelte:head>
 
-<main class="gate" style={gateStyle}>
-	{#if display}
-		<form class="box" onsubmit={submit}>
-			<p class="title">ARGOS alpha test program</p>
-			<p class="prompt">type your access code to start</p>
-			<input
-				bind:value={code}
-				oninput={() => (code = code.toUpperCase())}
-				maxlength="24"
-				autocomplete="off"
-				spellcheck="false"
-				placeholder="• • • •"
-				aria-label="access code"
-			/>
-			<button type="submit" disabled={busy || code.trim().length < 4}>
-				{busy ? 'checking…' : 'begin'}
-			</button>
-			{#if error}<p class="error">{error}</p>{/if}
-		</form>
-	{/if}
+<main class="letterbox" style:background={backdrop}>
+	<div class="frame" style={frameStyle}>
+		{#if display}
+			<div class="gate-content">
+				<form class="box" onsubmit={submit}>
+					<p class="title">ARGOS alpha test program</p>
+					<p class="prompt">type your access code to start</p>
+					<input
+						bind:value={code}
+						oninput={() => (code = code.toUpperCase())}
+						maxlength="24"
+						autocomplete="off"
+						spellcheck="false"
+						placeholder="• • • •"
+						aria-label="access code"
+					/>
+					<button type="submit" disabled={busy || code.trim().length < 4}>
+						{busy ? 'checking…' : 'begin'}
+					</button>
+					{#if error}<p class="error">{error}</p>{/if}
+				</form>
+			</div>
+		{/if}
+		<div class="crt" aria-hidden="true" style:background={crtBg}></div>
+	</div>
 </main>
 
 <style>
-	.gate {
+	.letterbox {
 		position: fixed;
+		inset: 0;
+		overflow: hidden;
+		background: #000;
+	}
+	/* The window renders at the build's resolution; size + placement + theme colours
+	   come from the inline frameStyle (scaled to fit, never up past 1:1). */
+	.frame {
+		position: absolute;
+		overflow: hidden;
+		font-family: var(--font-terminal, monospace);
+	}
+	.gate-content {
+		position: absolute;
 		inset: 0;
 		display: grid;
 		place-items: center;
-		background: var(--bg);
-		font-family: var(--font-terminal, monospace);
+	}
+	.crt {
+		position: absolute;
+		inset: 0;
+		z-index: 100;
+		pointer-events: none;
+		animation: crt-flicker 4s infinite;
+	}
+	@keyframes crt-flicker {
+		0%,
+		97%,
+		100% {
+			opacity: 1;
+		}
+		98% {
+			opacity: 0.82;
+		}
+		99% {
+			opacity: 0.94;
+		}
+	}
+	@media (prefers-reduced-motion: reduce) {
+		.crt {
+			animation: none;
+		}
 	}
 	.box {
 		display: flex;

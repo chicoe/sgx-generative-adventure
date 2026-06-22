@@ -318,6 +318,10 @@
 	// out-of-lives block on the end "press any key" screen.
 	let accessLives = $state<number | null>(null);
 	const outOfLives = $derived(accessLives !== null && accessLives <= 0);
+	// Whether this run is a kiosk (?kiosk) — set in onMount. Preserved when bouncing
+	// back to the code prompt so the kiosk keeps preloading after a new code.
+	let kioskMode = false;
+	const gateUrl = () => resolve('/') + (kioskMode ? '?kiosk=1' : '');
 
 	// Spend one life on the access code (when a run starts). If the code is out of
 	// lives (or unknown), bounce back to the code prompt. No code → nothing to do.
@@ -329,7 +333,7 @@
 		// Only bounce on a definite "no lives / unknown" — a transient error lets
 		// this run continue rather than kicking the player out on a network blip.
 		if (!res.ok && (res.reason === 'depleted' || res.reason === 'unknown')) {
-			location.href = resolve('/');
+			location.href = gateUrl();
 		}
 	}
 
@@ -657,7 +661,7 @@
 		if (accessCode) {
 			await refreshAccessLives();
 			if (accessLives !== null && accessLives <= 0) {
-				location.href = resolve('/');
+				location.href = gateUrl();
 				return;
 			}
 		}
@@ -1614,7 +1618,7 @@
 		// Kiosk mode (?kiosk in the URL): preload all media up front behind the
 		// loading screen so the live link only bites once. Without the tag we load
 		// assets on demand (lighter start) — the service worker still caches them.
-		const kioskMode = new URLSearchParams(window.location.search).has('kiosk');
+		kioskMode = new URLSearchParams(window.location.search).has('kiosk');
 		// Nothing visual starts here: the splash stays pure black until the build
 		// (palette + geometry) is in, then the BOOT gif opens the cycle and the
 		// interview follows it (startSplash + beginIntro in loadBuild's then).
