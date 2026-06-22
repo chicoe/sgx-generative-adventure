@@ -1409,13 +1409,18 @@
 			skipSplash();
 			return;
 		}
-		// Ending: a key skips the credits to the power-off, skips the transition
-		// message to the prompt, and from the prompt starts the next cycle.
+		// Ending: the cinematic plays out on its own — the player can NOT fast-forward
+		// it by mashing keys. Only ESC skips (a testing aid): from the credits to the
+		// power-off, from the transition message to the prompt. The final "press any
+		// key to start" prompt still boots the next cycle on any key.
 		if (atEnding) {
 			e.preventDefault();
-			if (endingPhase === 'cinema') skipEnding();
-			else if (endingPhase === 'message') showEndWait();
-			else if (endingPhase === 'wait') void restart();
+			if (endingPhase === 'wait') {
+				void restart();
+			} else if (e.key === 'Escape') {
+				if (endingPhase === 'message') showEndWait();
+				else skipEnding();
+			}
 			return;
 		}
 		if (introActive) {
