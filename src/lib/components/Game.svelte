@@ -19,7 +19,7 @@
 	import { resolve } from '$app/paths';
 	import { audioUnlocked, playSfx, playDrone } from '$lib/sfx';
 	import { pickTextVariant } from '$lib/text';
-	import { spendAccessLife } from '$lib/content/accessCodes';
+	import { spendAccessLife, checkAccessCode } from '$lib/content/accessCodes';
 	import { collectBuildAssets, preloadAssets } from '$lib/content/preload';
 	import { DEFAULT_DISPLAY, themeStyle, duotoneTable, crtBackground } from '$lib/theme';
 	import type { Build, ConversationTurn, Effect, GameState, Item, Scene } from '$lib/engine/types';
@@ -312,11 +312,19 @@
 		}, INTRO_FADE_MS + 150);
 	}
 
+	// Remaining lives on the access code AFTER this run was charged. null = no code
+	// in play (kiosk / specialaccess → unlimited). Drives the lives count and the
+	// out-of-lives block on the end "press any key" screen.
+	let accessLives = $state<number | null>(null);
+	const outOfLives = $derived(accessLives !== null && accessLives <= 0);
+
 	// Spend one life on the access code (when a run starts). If the code is out of
 	// lives (or unknown), bounce back to the code prompt. No code → nothing to do.
 	async function consumeAccessLife() {
 		if (!accessCode) return;
 		const res = await spendAccessLife(accessCode);
+		// Record the remaining lives (skip a transient error — leave the prior count).
+		if (res.reason !== 'error') accessLives = res.lives;
 		// Only bounce on a definite "no lives / unknown" — a transient error lets
 		// this run continue rather than kicking the player out on a network blip.
 		if (!res.ok && (res.reason === 'depleted' || res.reason === 'unknown')) {
@@ -631,6 +639,28 @@
 		// "Press any key to start" — a key then begins the next cycle.
 		clearEndTimers();
 		endingPhase = 'wait';
+		// Re-read the code's remaining lives from the source of truth so the count
+		// shown (and the out-of-lives block) is authoritative — independent of
+		// whether this run's spend result was captured.
+		void refreshAccessLives();
+	}
+	async function refreshAccessLives() {
+		if (!accessCode) return;
+		const res = await checkAccessCode(accessCode);
+		if (res.reason !== 'error') accessLives = res.lives;
+	}
+	// Continue from the end "press any key" screen: with an access code, re-check the
+	// live count first so a spent code can NEVER start another run (it returns to the
+	// code prompt instead). No code → just restart.
+	async function endWaitContinue() {
+		if (accessCode) {
+			await refreshAccessLives();
+			if (accessLives !== null && accessLives <= 0) {
+				location.href = resolve('/');
+				return;
+			}
+		}
+		void restart();
 	}
 	function skipEnding() {
 		// Jump straight to the power-off (so a tester needn't watch the whole roll).
@@ -1437,7 +1467,9 @@
 		if (atEnding) {
 			e.preventDefault();
 			if (endingPhase === 'wait') {
-				void restart();
+				// Re-checks the access code's lives first, so a spent code can't start
+				// another run (it returns to the code prompt instead).
+				void endWaitContinue();
 			} else if (e.key === 'Escape') {
 				if (endingPhase === 'message') showEndWait();
 				else skipEnding();
@@ -1741,9 +1773,24 @@
 							<p class="em-line two">{ENDING_MESSAGE_LINE_2}</p>
 						</div>
 					{:else if endingPhase === 'wait'}
-						<!-- The "press any key to start" prompt fades in; a key boots the
-						     next cycle (in-frame, so the CRT overlay applies). -->
-						<div class="ending-wait"><span>press any key to start</span></div>
+						<!-- End prompt (in-frame, so the CRT overlay applies). With an access
+						     code: show the lives left, and when spent, BLOCK the next run and
+						     say so — a key then returns to the code prompt. -->
+						<div class="ending-wait">
+							{#if outOfLives}
+								<span class="nolives">NO LIVES REMAINING</span>
+								<span class="lives-sub"
+									>this access code is spent — press any key for a new code</span
+								>
+							{:else}
+								<span>press any key to start</span>
+								{#if accessLives !== null}
+									<span class="lives-sub"
+										>{accessLives} {accessLives === 1 ? 'life' : 'lives'} left</span
+									>
+								{/if}
+							{/if}
+						</div>
 					{:else if endingPhase === 'prep'}
 						<!-- Brief black hold while the computer chooses the ending image. -->
 						<div class="ending-prep"></div>
@@ -2254,8 +2301,13 @@
 	.ending-wait {
 		position: absolute;
 		inset: 0;
-		display: grid;
-		place-items: center;
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		justify-content: center;
+		gap: 0.6rem;
+		text-align: center;
+		padding: 1rem;
 		animation: em-fadein 1.2s ease-out forwards;
 	}
 	.ending-wait span {
@@ -2265,6 +2317,16 @@
 		color: var(--ink-dim);
 		text-shadow: var(--glow);
 		animation: blink 1.1s steps(1) infinite;
+	}
+	.ending-wait .nolives {
+		color: var(--accent);
+	}
+	/* The lives count / spent note: steady (no blink), smaller, dimmer. */
+	.ending-wait .lives-sub {
+		font-size: 0.85rem;
+		letter-spacing: 0.16em;
+		animation: none;
+		opacity: 0.85;
 	}
 	@keyframes end-fadein {
 		from {
