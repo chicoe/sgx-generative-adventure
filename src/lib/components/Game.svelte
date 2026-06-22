@@ -936,12 +936,12 @@
 	// so it is safe during SSR/init; callers trigger the opening greeting).
 	function enterScene(b: Build, state: GameState, narration: string[]) {
 		const s = findScene(b.scenes, state.currentSceneId);
-		// Stats: log this room entry — only for REAL published runs (skip the
-		// placeholder build and the editor's draft testplay). For coded runs, also
-		// tally each ending reached against the access code.
-		if (buildSource === 'firestore' && s) {
+		// Stats: only count REAL coded plays — skip the placeholder build, the
+		// editor's draft testplay, and uncoded runs (kiosk / specialaccess). Log the
+		// room entry, and tally each ending reached against the access code.
+		if (buildSource === 'firestore' && s && accessCode) {
 			void logRoomEntry(state.currentSceneId);
-			if (s.ending && accessCode) void logEndingForCode(accessCode, state.currentSceneId);
+			if (s.ending) void logEndingForCode(accessCode, state.currentSceneId);
 		}
 		presentGiveables = s ? rollGiveableItems(s) : [];
 		for (const t of narration) push('narration', t);
@@ -1792,7 +1792,7 @@
 								>
 							{:else}
 								<span>press any key to start</span>
-								{#if accessLives !== null}
+								{#if accessLives !== null && accessLives <= 10}
 									<span class="lives-sub"
 										>{accessLives} {accessLives === 1 ? 'life' : 'lives'} left</span
 									>

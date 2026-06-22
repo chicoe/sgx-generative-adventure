@@ -60,7 +60,7 @@
 <main class="gate" style={gateStyle}>
 	{#if display}
 		<form class="box" onsubmit={submit}>
-			<p class="title">ARGOS Alpha test program</p>
+			<p class="title">ARGOS alpha test program</p>
 			<p class="prompt">type your access code to start</p>
 			<input
 				bind:value={code}
