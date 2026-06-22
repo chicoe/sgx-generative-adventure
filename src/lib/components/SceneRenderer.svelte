@@ -54,9 +54,42 @@
 	const layers = $derived(
 		[...scene.layers].sort((a, b) => a.z - b.z).map((l) => ({ ...l, src: srcFor(l) }))
 	);
+
+	// Hold every layer hidden until they have ALL loaded (and decoded), so a
+	// multi-layer scene appears as one image instead of one layer popping in after
+	// another. Re-runs whenever the set of layer images changes (scene / re-roll).
+	let ready = $state(false);
+	function loadOne(url: string): Promise<void> {
+		const img = new Image();
+		img.src = url;
+		return typeof img.decode === 'function'
+			? img.decode().catch(() => undefined)
+			: new Promise<void>((res) => {
+					img.onload = () => res();
+					img.onerror = () => res();
+				});
+	}
+	$effect(() => {
+		const urls = layers
+			.map((l) => l.src)
+			.filter((s): s is string => !!s)
+			.map(resolve);
+		if (!urls.length) {
+			ready = true;
+			return;
+		}
+		ready = false;
+		let cancelled = false;
+		Promise.all(urls.map(loadOne)).then(() => {
+			if (!cancelled) ready = true;
+		});
+		return () => {
+			cancelled = true;
+		};
+	});
 </script>
 
-<div class="viewport" style:filter={scene.filter?.css ?? ''}>
+<div class="viewport" class:ready style:filter={scene.filter?.css ?? ''}>
 	{#each layers as layer (layer.id)}
 		{#if layer.src}
 			<img
@@ -85,6 +118,12 @@
 		overflow: hidden;
 		/* transparent so the image blends straight into the frame's backdrop */
 		background: transparent;
+		/* Hidden until every layer has loaded, then all fade in together. */
+		opacity: 0;
+		transition: opacity 0.3s ease;
+	}
+	.viewport.ready {
+		opacity: 1;
 	}
 
 	.layer {

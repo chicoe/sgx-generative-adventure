@@ -91,7 +91,7 @@
 	//    any key/click dismisses ("continue anyway").
 	// Chromium browsers expose `userAgentData`; the UA regex is a fallback. The
 	// Raspberry Pi reports a desktop-Linux UA, so the mobile check never trips it.
-	let browserWarn = $state(false); // dismissable, non-Chromium desktop
+	let browserWarn = $state(false); // non-dismissable, non-Chromium desktop
 	let mobileBlock = $state(false); // non-dismissable, phone/tablet
 	function isChromium(): boolean {
 		if (typeof navigator === 'undefined') return true;
@@ -333,6 +333,8 @@
 		if (pendingOpening && splashPhase === 'done' && !loading) {
 			pendingOpening = false;
 			vitalsStartedAt = Date.now(); // the countdown starts with the game itself
+			startVitalsTriggers(); // schedule the timed life-support warnings + death
+			// Just greet — no time warning yet; the first one comes at the 5-min mark.
 			void afterEnter();
 		}
 	});
@@ -449,7 +451,36 @@
 	let clockNow = $state(Date.now());
 	let vitalsStartedAt = $state(Date.now());
 	const VITALS_START = 80; // %
-	const VITALS_DRAIN_MS = 300_000; // depletes to 0% over 5 minutes, then "ERROR"
+	const VITALS_DRAIN_MS = 360_000; // depletes to 0% over 6 minutes, then "ERROR"
+	const VITALS_FIRST_REMAINING_MS = 300_000; // first time warning when 5 minutes remain
+	const VITALS_WARN_REMAINING_MS = 120_000; // warn the player when 2 minutes remain
+	const VITALS_IMMINENT_REMAINING_MS = 30_000; // "death imminent" at 30 seconds
+	// Life-support triggers (sent to the computer as system events): a first warning
+	// at the 5-minutes-left mark, a 2-minutes-left warning, a 30-seconds "death
+	// imminent" beat, and a death event → gameover.
+	let vitalsTimers: ReturnType<typeof setTimeout>[] = [];
+	function clearVitalsTimers() {
+		vitalsTimers.forEach(clearTimeout);
+		vitalsTimers = [];
+	}
+	function startVitalsTriggers() {
+		clearVitalsTimers();
+		vitalsTimers = [
+			setTimeout(
+				() => void requestVitalsEvent('first'),
+				Math.max(0, VITALS_DRAIN_MS - VITALS_FIRST_REMAINING_MS)
+			),
+			setTimeout(
+				() => void requestVitalsEvent('warn'),
+				Math.max(0, VITALS_DRAIN_MS - VITALS_WARN_REMAINING_MS)
+			),
+			setTimeout(
+				() => void requestVitalsEvent('imminent'),
+				Math.max(0, VITALS_DRAIN_MS - VITALS_IMMINENT_REMAINING_MS)
+			),
+			setTimeout(() => void requestVitalsEvent('death'), VITALS_DRAIN_MS)
+		];
+	}
 
 	// A fictional off-world clock: a cycle of 20 arcs × 90 marks × 90 beats,
 	// ticking one beat per real second (numbers run past 60, so it never reads as
@@ -463,12 +494,29 @@
 	const vitalsPct = $derived(
 		Math.max(0, VITALS_START * (1 - (clockNow - vitalsStartedAt) / VITALS_DRAIN_MS))
 	);
+	// Live remaining air; the CRITICAL banner only shows inside the 2-minute mark.
+	const vitalsRemainingMs = $derived(Math.max(0, VITALS_DRAIN_MS - (clockNow - vitalsStartedAt)));
+	const vitalsCritical = $derived(
+		vitalsRemainingMs > 0 && vitalsRemainingMs <= VITALS_WARN_REMAINING_MS
+	);
+	// A human label of the air remaining, for the LLM (so the player can ask).
+	function lifeSupportLabel(): string {
+		const remaining = Math.max(0, VITALS_DRAIN_MS - (Date.now() - vitalsStartedAt));
+		if (remaining <= 0) return 'no time — guaranteed safety has already expired';
+		const total = Math.round(remaining / 1000);
+		const m = Math.floor(total / 60);
+		const s = total % 60;
+		return m > 0
+			? `${m} minute${m === 1 ? '' : 's'} ${s} second${s === 1 ? '' : 's'}`
+			: `${s} seconds`;
+	}
 
 	// Ending cinematic: an ending scene plays full-screen (only its art, drifting
 	// with parallax) while its intro text scrolls like credits, then a CRT
 	// power-off, then a dark transition message, then "press any key to start".
 	let atEnding = $state(false);
-	let endingPhase = $state<'cinema' | 'tvoff' | 'message' | 'wait' | null>(null);
+	// 'prep' = brief black hold while the computer chooses the ending background.
+	let endingPhase = $state<'prep' | 'cinema' | 'tvoff' | 'message' | 'wait' | null>(null);
 	// The transition message shown on the dark screen after the power-off.
 	const ENDING_MESSAGE_LINE_1 = 'One story ends here';
 	const ENDING_MESSAGE_LINE_2 = 'Another one is about to begin';
@@ -485,6 +533,28 @@
 	// The credits text for THIS run — one variant, picked once when the ending
 	// starts (the scene's intro text may hold several, split by a "---" line).
 	let endingText = $state('');
+	// The background image the computer chose for THIS ending (from the scene's
+	// tagged candidates, matched to the player). null = none picked / no candidates.
+	let endingBg = $state<string | null>(null);
+	let cinemaStarted = false; // guards the cinema starting twice (choice vs timeout)
+	const ENDING_PREP_TIMEOUT_MS = 6000; // max black hold while the LLM picks the image
+	// What the ending cinematic renders: the chosen background as a single drifting
+	// layer when one was picked, else the ending scene's own authored art.
+	const endRenderScene = $derived.by(() => {
+		const s = findScene(build.scenes, game.currentSceneId);
+		if (!endingBg) return s;
+		const synthetic: Scene = {
+			id: '__ending__',
+			name: s?.name ?? '',
+			layers: [
+				{ id: '__bg__', imagePath: endingBg, imagePaths: [endingBg], z: 0, parallaxFactor: 0.25 }
+			],
+			filter: s?.filter,
+			hotspots: [],
+			exits: []
+		};
+		return synthetic;
+	});
 
 	function clearEndTimers() {
 		endTimers.forEach(clearTimeout);
@@ -497,15 +567,60 @@
 	}
 	function beginEnding() {
 		clearEndTimers();
+		clearVitalsTimers(); // the run is over — no life-support death trigger
 		atEnding = true;
+		endingBg = null;
+		cinemaStarted = false;
+		const s = findScene(build.scenes, game.currentSceneId);
+		endingText = pickTextVariant(s?.introText);
+		const candidates = s?.endingBackgrounds ?? [];
+		if (s && candidates.length) {
+			// Let the computer pick the ending image that fits this player; hold a brief
+			// black "prep" screen so the chosen art is ready when the cinema fades in.
+			// A timeout starts the cinema anyway if the choice is slow.
+			endingPhase = 'prep';
+			endTimers = [setTimeout(startEndingCinema, ENDING_PREP_TIMEOUT_MS)];
+			void chooseEndingBg(s, candidates).then(startEndingCinema);
+		} else {
+			startEndingCinema();
+		}
+	}
+	// Begin the full-screen cinema (pan + credits) and arm the phase timers. Guarded
+	// so the choice resolving and the prep-timeout can't both start it.
+	function startEndingCinema() {
+		if (cinemaStarted) return;
+		cinemaStarted = true;
+		clearEndTimers(); // cancel the prep-timeout if it is still pending
 		endingPhase = 'cinema';
 		endCinemaStart = Date.now();
-		endingText = pickTextVariant(findScene(build.scenes, game.currentSceneId)?.introText);
 		endTimers = [
 			setTimeout(enterTvOff, ENDING_CINEMA_MS),
 			setTimeout(showEndMessage, ENDING_CINEMA_MS + ENDING_TVOFF_MS),
 			setTimeout(showEndWait, ENDING_CINEMA_MS + ENDING_TVOFF_MS + ENDING_MESSAGE_MS)
 		];
+	}
+	// Ask the computer to pick the ending image that best fits this player from the
+	// scene's tagged candidates. Falls back to the first candidate on any failure.
+	async function chooseEndingBg(s: Scene, candidates: NonNullable<Scene['endingBackgrounds']>) {
+		let src = candidates[0].src;
+		try {
+			const resp = await fetch('/api/choose-ending', {
+				method: 'POST',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify({
+					options: candidates.map((c) => ({ id: c.id, tags: c.tags, description: c.description })),
+					sceneName: s.name,
+					scenePrompt: s.prompt,
+					history: withProfile(convo.slice(-MAX_HISTORY_TURNS))
+				})
+			});
+			const data = await resp.json();
+			const chosen = candidates.find((c) => c.id === data?.chosenId);
+			if (chosen) src = chosen.src;
+		} catch {
+			/* keep the first candidate */
+		}
+		endingBg = src;
 	}
 	function showEndMessage() {
 		// Dark screen with the two transition messages (in-frame, so the CRT
@@ -732,6 +847,7 @@
 		return {
 			name: s.name,
 			prompt: s.prompt,
+			lifeSupport: lifeSupportLabel(), // current air remaining (player can ask)
 			cameFrom: cameFromId ? findScene(build.scenes, cameFromId)?.name : undefined,
 			// Doors are bidirectional by default. LOCKED doors never appear in `exits`
 			// (no outcome is synthesized to move through them). Sealed routes split:
@@ -818,6 +934,7 @@
 		scanTimers.forEach(clearTimeout);
 		scanning = false;
 		scanCell = -1;
+		clearVitalsTimers(); // a fresh run re-arms them when the game begins
 		vitalsStartedAt = Date.now(); // a fresh run starts at full(ish) vitals
 		enterScene(b, started.state, started.messages);
 	}
@@ -825,8 +942,12 @@
 	// History for a converse request: the most recent turns, with the intake-
 	// questionnaire turn pinned in front if slicing would have dropped it — the
 	// computer must never forget the player's answers (or that they skipped).
+	// Compare by text, not reference: `recent` holds $state proxies whose identity
+	// differs from the raw profileTurn object, so .includes() would never match.
 	function withProfile(recent: ConversationTurn[]): ConversationTurn[] {
-		return profileTurn && !recent.includes(profileTurn) ? [profileTurn, ...recent] : recent;
+		if (!profileTurn) return recent;
+		const present = recent.some((t) => t.text === profileTurn!.text);
+		return present ? recent : [profileTurn, ...recent];
 	}
 
 	initFrom(placeholderBuild);
@@ -864,6 +985,77 @@
 		} finally {
 			pending = false;
 		}
+	}
+
+	// A safety/countdown event the computer reacts to (start alert / 2-min warning
+	// / 30-second "fatal event imminent" / death). Deliberately AMBIGUOUS about the
+	// cause (the game-over can be anything). Shows a system banner + the computer's
+	// reply; on death, the player is sent to the "gameover" scene.
+	async function requestVitalsEvent(kind: 'first' | 'warn' | 'imminent' | 'death') {
+		const behaviour = activeBehaviourId
+			? build.behaviours.find((b) => b.id === activeBehaviourId)
+			: undefined;
+		if (!behaviour) return;
+		const firstMins = Math.round(VITALS_FIRST_REMAINING_MS / 60000);
+		const eventText =
+			kind === 'first'
+				? `Safety can only be guaranteed for about ${firstMins} more minutes — after that a fatal event is expected. Warn the player.`
+				: kind === 'warn'
+					? 'Predicted survival estimate down to 2 minutes — a fatal event is expected after that. Warn the player urgently.'
+					: kind === 'imminent'
+						? 'Predicted safety expires in 30 seconds — a fatal event is imminent. Say something to the player NOW.'
+						: 'A fatal event has occurred; the player did not survive.';
+		const banner =
+			kind === 'first'
+				? `-- guaranteed safety: ${firstMins} min --`
+				: kind === 'warn'
+					? '-- fatal event expected in 2 min --'
+					: kind === 'imminent'
+						? '-- fatal event imminent: 30 sec --'
+						: '-- FATAL EVENT --';
+		push('system', banner);
+		pending = true;
+		try {
+			const resp = await fetch('/api/converse', {
+				method: 'POST',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify({
+					behaviourId: behaviour.id,
+					event: eventText,
+					history: withProfile(convo.slice(-MAX_HISTORY_TURNS)),
+					sceneContext: sceneContextFor(scene, game)
+				})
+			});
+			const data = await resp.json();
+			// Record the event + reply so later turns know it happened.
+			convo = [
+				...convo,
+				{ role: 'system', text: `STATE UPDATE: ${eventText}`, behaviourId: behaviour.id }
+			];
+			if (resp.ok && data.reply) {
+				push('computer', data.reply);
+				playSfx('receive');
+				convo = [...convo, { role: 'computer', text: data.reply, behaviourId: behaviour.id }];
+			}
+		} catch {
+			/* best-effort */
+		} finally {
+			pending = false;
+		}
+		if (kind === 'death') goToGameOver();
+	}
+
+	// Death: move the player to the scene with id "gameover" (if authored). If it
+	// is an ending scene, that plays the ending cinematic.
+	function goToGameOver() {
+		clearVitalsTimers();
+		const go = build.scenes.find((s) => s.id.toLowerCase() === 'gameover');
+		if (!go) return; // no gameover scene authored — nothing to navigate to
+		const prev = game.currentSceneId;
+		game = applyEffects(game, [{ type: 'goToScene', sceneId: go.id }]);
+		cameFromId = prev;
+		enterScene(build, game, []);
+		void afterEnter();
 	}
 
 	// After entering a scene: an ending scene plays the full-screen ending
@@ -1218,10 +1410,10 @@
 	const target = { x: 0, y: 0 };
 
 	function onKeydown(e: KeyboardEvent) {
-		// The browser notice is topmost: any key just dismisses it.
+		// The browser block is topmost and non-dismissable: swallow all input so the
+		// game running behind it can't react (the user must switch to Chrome).
 		if (browserWarn) {
 			e.preventDefault();
-			browserWarn = false;
 			return;
 		}
 		// Waiting for the audio-unlocking gesture: any key starts the boot.
@@ -1238,13 +1430,18 @@
 			skipSplash();
 			return;
 		}
-		// Ending: a key skips the credits to the power-off, skips the transition
-		// message to the prompt, and from the prompt starts the next cycle.
+		// Ending: the cinematic plays out on its own — the player can NOT fast-forward
+		// it by mashing keys. Only ESC skips (a testing aid): from the credits to the
+		// power-off, from the transition message to the prompt. The final "press any
+		// key to start" prompt still boots the next cycle on any key.
 		if (atEnding) {
 			e.preventDefault();
-			if (endingPhase === 'cinema') skipEnding();
-			else if (endingPhase === 'message') showEndWait();
-			else if (endingPhase === 'wait') void restart();
+			if (endingPhase === 'wait') {
+				void restart();
+			} else if (e.key === 'Escape') {
+				if (endingPhase === 'message') showEndWait();
+				else skipEnding();
+			}
 			return;
 		}
 		if (introActive) {
@@ -1277,17 +1474,33 @@
 
 	let transcriptEl = $state<HTMLDivElement>();
 	// Old-OS scrollbar metrics (thumb size + position track the transcript).
+	const SB_MIN_THUMB_PX = 16; // matches .sb-thumb min-height — keep the two in sync
 	let scTop = $state(0);
 	let scHeight = $state(0);
 	let scClient = $state(0);
+	let scTrack = $state(0); // the track's pixel height (for the min-thumb floor)
 	function syncScroll() {
 		if (!transcriptEl) return;
 		scTop = transcriptEl.scrollTop;
 		scHeight = transcriptEl.scrollHeight;
 		scClient = transcriptEl.clientHeight;
+		if (sbTrackEl) scTrack = sbTrackEl.clientHeight;
 	}
-	const sbThumbPct = $derived(scHeight > 0 ? Math.min(1, scClient / scHeight) : 1);
-	const sbThumbTopPct = $derived(scHeight > scClient ? scTop / scHeight : 0);
+	// Thumb height as a fraction of the track, floored at SB_MIN_THUMB_PX so it
+	// stays grabbable when the log is very long.
+	const sbThumbPct = $derived.by(() => {
+		if (scHeight <= scClient || scHeight <= 0) return 1; // no overflow → full thumb
+		const raw = scClient / scHeight;
+		const minFrac = scTrack > 0 ? SB_MIN_THUMB_PX / scTrack : raw;
+		return Math.min(1, Math.max(raw, minFrac));
+	});
+	// Position the thumb over the REMAINING track (1 − thumbHeight) so top+height
+	// can never exceed 100% — otherwise the floored thumb overflows past the track.
+	const sbThumbTopPct = $derived.by(() => {
+		if (scHeight <= scClient) return 0;
+		const progress = Math.max(0, Math.min(1, scTop / (scHeight - scClient)));
+		return progress * (1 - sbThumbPct);
+	});
 	$effect(() => {
 		if (lines.length && transcriptEl) transcriptEl.scrollTop = transcriptEl.scrollHeight;
 		syncScroll();
@@ -1455,6 +1668,7 @@
 			splashTimers.forEach(clearTimeout);
 			scanTimers.forEach(clearTimeout);
 			endTimers.forEach(clearTimeout);
+			clearVitalsTimers();
 			stopSceneAmbient();
 			unsubLive?.();
 		};
@@ -1477,22 +1691,15 @@
 		</div>
 	</div>
 {:else if browserWarn}
-	<!-- Non-Chromium desktop: a soft notice; any key (see onKeydown) or a click
-	     dismisses it. Topmost, palette-independent hardcoded colours. -->
-	<div
-		class="browserwarn"
-		role="button"
-		tabindex="0"
-		onclick={() => (browserWarn = false)}
-		onkeydown={() => (browserWarn = false)}
-	>
+	<!-- Non-Chromium desktop: a hard, non-dismissable block (Chrome-only
+	     experience). Topmost, palette-independent hardcoded colours. -->
+	<div class="browserwarn" role="alert">
 		<div class="bw-box">
-			<p class="bw-title">⚠ BUILT FOR CHROME</p>
+			<p class="bw-title">⚠ CHROME REQUIRED</p>
 			<p>
-				This experience is designed for <strong>Google Chrome / Chromium</strong>. In other browsers
-				some visuals, video or audio may not work as intended.
+				This experience requires <strong>Google Chrome / Chromium</strong>. Please reopen it in
+				Chrome to continue.
 			</p>
-			<p class="bw-hint">press any key to continue</p>
 		</div>
 	</div>
 {/if}
@@ -1521,10 +1728,10 @@
 		</svg>
 		<div class="frame" style={frameStyle}>
 			{#if atEnding}
-				{@const endScene = findScene(build.scenes, game.currentSceneId)}
 				<!-- Ending cinematic: full-screen scene art (drifting with parallax) +
-				     credits scroll, then a CRT power-off. Same duotone filter as the
-				     normal content so the art stays on-palette. -->
+				     credits scroll, then a CRT power-off. The background is the computer's
+				     chosen candidate (endRenderScene) when there is one, else the scene's
+				     own art. Same duotone filter as the normal content (on-palette). -->
 				<div class="endwrap" class:duo={display.mode !== 'full'}>
 					{#if endingPhase === 'message'}
 						<!-- Dark transition screen: two lines fade in (the second a beat
@@ -1537,11 +1744,14 @@
 						<!-- The "press any key to start" prompt fades in; a key boots the
 						     next cycle (in-frame, so the CRT overlay applies). -->
 						<div class="ending-wait"><span>press any key to start</span></div>
+					{:else if endingPhase === 'prep'}
+						<!-- Brief black hold while the computer chooses the ending image. -->
+						<div class="ending-prep"></div>
 					{:else}
 						<div class="ending-scene" class:tvoff={endingPhase === 'tvoff'}>
 							<div class="ending-art" style:animation-duration={`${ENDING_CINEMA_MS}ms`}>
-								{#if endScene && sceneHasArt(endScene)}
-									<SceneRenderer scene={endScene} {look} picks={artPicks} amp={ENDING_AMP} />
+								{#if endRenderScene && sceneHasArt(endRenderScene)}
+									<SceneRenderer scene={endRenderScene} {look} picks={artPicks} amp={ENDING_AMP} />
 								{:else}
 									<div class="nosignal" aria-label="no signal">
 										<div class="static"></div>
@@ -1586,9 +1796,9 @@
 							<span class="room">{scene.name}</span>
 						</div>
 						<div class="grp right">
-							<span class="status">⚠ CRITICAL</span>
+							{#if vitalsCritical}<span class="status">⚠ CRITICAL</span>{/if}
 							<span class="vitals" class:low={vitalsPct <= 25}>
-								VITALS {vitalsPct <= 0 ? 'ERROR' : `${Math.round(vitalsPct)}%`}
+								PREDICTED SURVIVAL {vitalsPct <= 0 ? 'ERROR' : `${Math.round(vitalsPct)}%`}
 							</span>
 							<span
 								class="led {buildSource}"
@@ -1926,13 +2136,6 @@
 	.bw-box strong {
 		color: #ffd980;
 	}
-	.bw-hint {
-		margin-top: 1.4rem;
-		font-size: 0.8rem;
-		color: #8a6a18;
-		letter-spacing: 0.2em;
-		animation: blink 1.1s steps(1) infinite;
-	}
 
 	.failpage {
 		position: fixed;
@@ -1984,6 +2187,12 @@
 		background: #000;
 		filter: url(#sgx-duotone);
 	}
+	/* The brief "choosing the ending image" hold: full-bleed, the endwrap's dark
+	   background shows through (the screen warming up before the reveal). */
+	.ending-prep {
+		position: absolute;
+		inset: 0;
+	}
 	.ending-scene {
 		position: absolute;
 		inset: 0;
@@ -2017,7 +2226,7 @@
 		flex-direction: column;
 		align-items: center;
 		justify-content: center;
-		gap: 4.2em; /* ≈ 3 blank lines between them */
+		gap: 0.4em; /* normal line spacing, as if they were two consecutive lines */
 		text-align: center;
 		padding: 1rem;
 	}
@@ -2051,7 +2260,7 @@
 	}
 	.ending-wait span {
 		font-family: var(--font-terminal);
-		font-size: 1rem;
+		font-size: 1.3rem; /* match the ending message lines */
 		letter-spacing: 0.2em;
 		color: var(--ink-dim);
 		text-shadow: var(--glow);
@@ -2153,12 +2362,12 @@
 		filter: url(#sgx-duotone);
 	}
 	/* Semantic non-palette colours (CRITICAL red, the LED) would otherwise
-	   luminance-snap unpredictably — pull them onto the monochrome ink first. */
+	   luminance-snap unpredictably — pull them onto the monochrome ink first. The
+	   CRITICAL alarm keeps its blink (an opacity pulse is palette-safe). */
 	.content.duo .statusbar .status,
 	.content.duo .statusbar .vitals.low {
 		color: var(--ink);
 		text-shadow: none;
-		animation: none;
 	}
 	.content.duo .led {
 		background: var(--ink);

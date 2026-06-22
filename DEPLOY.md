@@ -84,7 +84,7 @@ version, then roll out so the backend picks it up:
 firebase apphosting:secrets:set GEMINI_API_KEY --project sgx-generative-adventure
 # paste the new key when prompted
 firebase apphosting:rollouts:create <backend-id> --project sgx-generative-adventure
-# (or just `git push origin main` — any rollout adopts the new version)
+# (or just `git push origin main` — any rollout adopts the new version!)
 ```
 
 The previous secret version stays in Secret Manager; disable or destroy it in the

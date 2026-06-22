@@ -40,6 +40,21 @@ describe('buildPrompt', () => {
 		expect(buildPrompt(behaviour, [], 'x').userPrompt).toContain('(no prior turns)');
 	});
 
+	it('frames a system event for the computer to react to (no player line)', () => {
+		const { userPrompt } = buildPrompt(
+			behaviour,
+			[],
+			'',
+			undefined,
+			false,
+			false,
+			'Life support CRITICAL: 2 minutes remain.'
+		);
+		expect(userPrompt).toContain('SYSTEM EVENT');
+		expect(userPrompt).toContain('Life support CRITICAL: 2 minutes remain.');
+		expect(userPrompt).not.toContain('PLAYER:');
+	});
+
 	it('tells the model the deck plan display works (the "__map__" outcome)', () => {
 		const { systemInstruction } = buildPrompt(behaviour, [], 'show me the map');
 		expect(systemInstruction).toContain('"__map__"');

@@ -200,6 +200,39 @@
 		if (!current?.giveableItems) return;
 		current.giveableItems[i].chance = Math.max(0, Math.min(100, pct || 0)) / 100;
 	}
+
+	// ending backgrounds (ending scenes only): tagged candidate images — the
+	// computer picks the one that best matches the player from the intake interview.
+	const addEndingBg = (src: string) =>
+		current &&
+		src.trim() &&
+		(current.endingBackgrounds = [
+			...(current.endingBackgrounds ?? []),
+			{ id: `eb-${Date.now()}`, src: src.trim(), tags: [], description: '' }
+		]);
+	const removeEndingBg = (i: number) =>
+		current &&
+		(current.endingBackgrounds = (current.endingBackgrounds ?? []).filter((_, j) => j !== i));
+	function setEndingBgTags(i: number, str: string) {
+		if (!current?.endingBackgrounds) return;
+		current.endingBackgrounds[i].tags = str
+			.split(',')
+			.map((t) => t.trim())
+			.filter(Boolean);
+	}
+	let endingBgDraft = $state('');
+	async function uploadEndingBg(file?: File) {
+		if (!file || !current) return;
+		uploading = true;
+		message = '';
+		try {
+			addEndingBg(await uploadImage(file, 'endings'));
+		} catch (e) {
+			message = e instanceof Error ? e.message : String(e);
+		} finally {
+			uploading = false;
+		}
+	}
 </script>
 
 <h1>Scenes</h1>
@@ -417,6 +450,66 @@
 			>
 			{#if !itemIds.length}<span class="muted"> create items first</span>{/if}
 		</fieldset>
+
+		{#if current.ending}
+			<fieldset>
+				<legend
+					>ending backgrounds (the computer picks ONE to match the player from the intake interview
+					— tag each so it can choose; leave empty to use this scene's own art)</legend
+				>
+				{#each current.endingBackgrounds ?? [] as eb, i (eb.id)}
+					<div class="layer">
+						<button
+							type="button"
+							class="thumb-open"
+							title="open image in a new tab"
+							onclick={() => window.open(imgUrl(eb.src), '_blank', 'noopener,noreferrer')}
+						>
+							<img class="thumb" src={imgUrl(eb.src)} alt="" />
+						</button>
+						<div class="layer-fields">
+							<input
+								placeholder="tags, comma separated (e.g. crowded, warm, city)"
+								value={(current.endingBackgrounds![i].tags ?? []).join(', ')}
+								oninput={(e) => setEndingBgTags(i, e.currentTarget.value)}
+							/>
+							<input
+								placeholder="description (optional)"
+								bind:value={current.endingBackgrounds![i].description}
+							/>
+						</div>
+						<button type="button" class="x" title="remove" onclick={() => removeEndingBg(i)}
+							>✕</button
+						>
+					</div>
+				{/each}
+				<div class="rowline">
+					<input
+						placeholder="add image by path / URL"
+						bind:value={endingBgDraft}
+						onkeydown={(e) => {
+							if (e.key === 'Enter') {
+								e.preventDefault();
+								addEndingBg(endingBgDraft);
+								endingBgDraft = '';
+							}
+						}}
+					/>
+					<button
+						type="button"
+						onclick={() => {
+							addEndingBg(endingBgDraft);
+							endingBgDraft = '';
+						}}>add</button
+					>
+					<input
+						type="file"
+						accept="image/png,image/jpeg,image/gif"
+						onchange={(e) => uploadEndingBg(e.currentTarget.files?.[0])}
+					/>
+				</div>
+			</fieldset>
+		{/if}
 
 		<EffectsEditor
 			bind:effects={current.onEnter!}
