@@ -84,7 +84,7 @@
 	//    any key/click dismisses ("continue anyway").
 	// Chromium browsers expose `userAgentData`; the UA regex is a fallback. The
 	// Raspberry Pi reports a desktop-Linux UA, so the mobile check never trips it.
-	let browserWarn = $state(false); // dismissable, non-Chromium desktop
+	let browserWarn = $state(false); // non-dismissable, non-Chromium desktop
 	let mobileBlock = $state(false); // non-dismissable, phone/tablet
 	function isChromium(): boolean {
 		if (typeof navigator === 'undefined') return true;
@@ -1389,10 +1389,10 @@
 	const target = { x: 0, y: 0 };
 
 	function onKeydown(e: KeyboardEvent) {
-		// The browser notice is topmost: any key just dismisses it.
+		// The browser block is topmost and non-dismissable: swallow all input so the
+		// game running behind it can't react (the user must switch to Chrome).
 		if (browserWarn) {
 			e.preventDefault();
-			browserWarn = false;
 			return;
 		}
 		// Waiting for the audio-unlocking gesture: any key starts the boot.
@@ -1670,22 +1670,15 @@
 		</div>
 	</div>
 {:else if browserWarn}
-	<!-- Non-Chromium desktop: a soft notice; any key (see onKeydown) or a click
-	     dismisses it. Topmost, palette-independent hardcoded colours. -->
-	<div
-		class="browserwarn"
-		role="button"
-		tabindex="0"
-		onclick={() => (browserWarn = false)}
-		onkeydown={() => (browserWarn = false)}
-	>
+	<!-- Non-Chromium desktop: a hard, non-dismissable block (Chrome-only
+	     experience). Topmost, palette-independent hardcoded colours. -->
+	<div class="browserwarn" role="alert">
 		<div class="bw-box">
-			<p class="bw-title">⚠ BUILT FOR CHROME</p>
+			<p class="bw-title">⚠ CHROME REQUIRED</p>
 			<p>
-				This experience is designed for <strong>Google Chrome / Chromium</strong>. In other browsers
-				some visuals, video or audio may not work as intended.
+				This experience requires <strong>Google Chrome / Chromium</strong>. Please reopen it in
+				Chrome to continue.
 			</p>
-			<p class="bw-hint">press any key to continue</p>
 		</div>
 	</div>
 {/if}
@@ -2121,13 +2114,6 @@
 	}
 	.bw-box strong {
 		color: #ffd980;
-	}
-	.bw-hint {
-		margin-top: 1.4rem;
-		font-size: 0.8rem;
-		color: #8a6a18;
-		letter-spacing: 0.2em;
-		animation: blink 1.1s steps(1) infinite;
 	}
 
 	.failpage {
