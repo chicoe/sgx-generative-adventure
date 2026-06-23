@@ -34,11 +34,21 @@
 		// Keep keyboard focus on the code field — if the window/WM hands focus back
 		// (kiosk boot), pull it into the input so typing the code works.
 		const refocus = () => inputEl?.focus();
+		// Keyboard-only kiosk: a click anywhere but the field must NOT steal focus —
+		// preventDefault keeps the caret in the input so typing always lands there.
+		const keepFocus = (e: MouseEvent) => {
+			if (inputEl && e.target !== inputEl) {
+				e.preventDefault();
+				inputEl.focus();
+			}
+		};
 		window.addEventListener('resize', computeScale);
 		window.addEventListener('focus', refocus);
+		window.addEventListener('mousedown', keepFocus);
 		return () => {
 			window.removeEventListener('resize', computeScale);
 			window.removeEventListener('focus', refocus);
+			window.removeEventListener('mousedown', keepFocus);
 		};
 	});
 	// Focus the field as soon as it renders (the form appears once the build loads).
