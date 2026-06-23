@@ -69,7 +69,7 @@
 	const pcrtBg = $derived(crtBackground(display.crt));
 </script>
 
-<h1>Display</h1>
+<h1>Settings</h1>
 <p class="note">Global look — applies to the whole game once published.</p>
 {#if message}<p class="msg">{message}</p>{/if}
 

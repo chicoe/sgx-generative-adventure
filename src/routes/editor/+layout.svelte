@@ -73,7 +73,7 @@
 				</div>
 				<span class="sep" aria-hidden="true"></span>
 				<div class="group">
-					<a href={resolve('/editor/settings')}>Display</a>
+					<a href={resolve('/editor/settings')}>Settings</a>
 					<a href={resolve('/editor/access')}>Access</a>
 				</div>
 				<div class="group right">
