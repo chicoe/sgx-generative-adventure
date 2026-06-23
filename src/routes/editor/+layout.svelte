@@ -61,15 +61,25 @@
 		</div>
 		{#if authStore.user}
 			<nav class="bar">
-				<a href={resolve('/editor')}>Overview</a>
-				<a href={resolve('/editor/graph')}>Graph</a>
-				<a href={resolve('/editor/scenes')}>Scenes</a>
-				<a href={resolve('/editor/items')}>Items</a>
-				<a href={resolve('/editor/behaviours')}>Behaviours</a>
-				<a href={resolve('/editor/settings')}>Display</a>
-				<a href={resolve('/editor/access')}>Access</a>
-				<a href={resolve('/testplay')}>▶ Test</a>
-				<a href={resolve('/play')}>▶ Play</a>
+				<div class="group">
+					<a href={resolve('/editor')}>Overview</a>
+				</div>
+				<span class="sep" aria-hidden="true"></span>
+				<div class="group">
+					<a href={resolve('/editor/graph')}>Graph</a>
+					<a href={resolve('/editor/scenes')}>Scenes</a>
+					<a href={resolve('/editor/items')}>Items</a>
+					<a href={resolve('/editor/behaviours')}>Behaviours</a>
+				</div>
+				<span class="sep" aria-hidden="true"></span>
+				<div class="group">
+					<a href={resolve('/editor/settings')}>Display</a>
+					<a href={resolve('/editor/access')}>Access</a>
+				</div>
+				<div class="group right">
+					<a href={resolve('/testplay')}>▶ Test</a>
+					<a href={resolve('/play')}>▶ Play</a>
+				</div>
 			</nav>
 		{/if}
 	</header>
@@ -113,6 +123,26 @@
 	.bar.info {
 		border-bottom: 1px solid var(--line);
 	}
+	/* The nav groups its links into blocks: left-aligned with separators, and the
+	   Test/Play block pushed to the far right. */
+	nav.bar {
+		justify-content: flex-start;
+		flex-wrap: wrap;
+		row-gap: 0.4rem;
+	}
+	.group {
+		display: flex;
+		align-items: center;
+		gap: 1rem;
+	}
+	.group.right {
+		margin-left: auto;
+	}
+	.sep {
+		width: 1px;
+		align-self: stretch;
+		background: var(--line);
+	}
 	.brand {
 		letter-spacing: 0.18em;
 		color: var(--ink-dim);
@@ -120,6 +150,7 @@
 	}
 	header nav a {
 		white-space: nowrap;
+		text-transform: uppercase;
 	}
 	.spacer {
 		flex: 1;

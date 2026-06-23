@@ -177,6 +177,28 @@
 			>
 		</fieldset>
 
+		<fieldset>
+			<legend>countdown (predicted survival)</legend>
+			<label class="num"
+				>minutes <input
+					type="number"
+					min="1"
+					max="60"
+					step="1"
+					value={Math.round((display.survivalSeconds ?? 360) / 60)}
+					oninput={(e) =>
+						(display.survivalSeconds = Math.max(
+							60,
+							Math.min(3600, Math.round(e.currentTarget.valueAsNumber || 0) * 60)
+						))}
+				/></label
+			>
+			<span class="muted small"
+				>how long the survival timer runs before a fatal event; the midpoint heads-up alert scales
+				with this (the 2-min &amp; 30-sec warnings stay absolute)</span
+			>
+		</fieldset>
+
 		<div class="actions">
 			<button type="button" class="primary" onclick={save} disabled={busy}>Save</button>
 		</div>

@@ -16,7 +16,8 @@ export const DEFAULT_DISPLAY: DisplaySettings = {
 	uiOpacity: 0.74,
 	crt: 1,
 	invertUi: false,
-	fontScale: 1
+	fontScale: 1,
+	survivalSeconds: 360
 };
 
 export interface ColorPreset {

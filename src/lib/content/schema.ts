@@ -136,7 +136,8 @@ export const displaySettingsSchema = z.object({
 	uiOpacity: z.number().min(0).max(1),
 	crt: z.number().min(0).max(1),
 	invertUi: z.boolean().optional(),
-	fontScale: z.number().min(0.5).max(2).optional()
+	fontScale: z.number().min(0.5).max(2).optional(),
+	survivalSeconds: z.number().int().min(30).max(3600).optional()
 });
 
 export const buildMetaSchema = z.object({

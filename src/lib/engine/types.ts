@@ -189,6 +189,9 @@ export interface DisplaySettings {
 	crt: number; // 0..1 — CRT effect strength (scanlines, vignette, phosphor glow)
 	invertUi?: boolean; // swap bg/ui for the UI only (bright panels, dark text); scene art unchanged
 	fontScale?: number; // 0.5..2 — multiplies every font size in the game (kiosk tuning)
+	// Survival countdown length in seconds (the "predicted survival" timer). The
+	// midpoint heads-up alert scales with this; default 360 (6 min).
+	survivalSeconds?: number;
 }
 
 // ---------------------------------------------------------------------------

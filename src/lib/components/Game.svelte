@@ -464,13 +464,15 @@
 	let clockNow = $state(Date.now());
 	let vitalsStartedAt = $state(Date.now());
 	const VITALS_START = 80; // %
-	const VITALS_DRAIN_MS = 360_000; // depletes to 0% over 6 minutes, then "ERROR"
-	const VITALS_FIRST_REMAINING_MS = 300_000; // first time warning when 5 minutes remain
-	const VITALS_WARN_REMAINING_MS = 120_000; // warn the player when 2 minutes remain
-	const VITALS_IMMINENT_REMAINING_MS = 30_000; // "death imminent" at 30 seconds
-	// Life-support triggers (sent to the computer as system events): a first warning
-	// at the 5-minutes-left mark, a 2-minutes-left warning, a 30-seconds "death
-	// imminent" beat, and a death event → gameover.
+	const VITALS_DEFAULT_SECONDS = 360; // fallback when the build sets no timer
+	// Total survival countdown — configurable per build (display.survivalSeconds).
+	// Drains the readout to 0% over this span, then "ERROR".
+	const vitalsDrainMs = $derived((display.survivalSeconds ?? VITALS_DEFAULT_SECONDS) * 1000);
+	const VITALS_WARN_REMAINING_MS = 120_000; // urgent warning at 2 minutes remaining
+	const VITALS_IMMINENT_REMAINING_MS = 30_000; // "death imminent" at 30 seconds remaining
+	// Life-support triggers (system events to the computer): a MIDPOINT heads-up
+	// (proportional to the total), then the 2-minutes-left and 30-seconds warnings,
+	// and a death event → gameover.
 	let vitalsTimers: ReturnType<typeof setTimeout>[] = [];
 	function clearVitalsTimers() {
 		vitalsTimers.forEach(clearTimeout);
@@ -478,21 +480,28 @@
 	}
 	function startVitalsTriggers() {
 		clearVitalsTimers();
-		vitalsTimers = [
-			setTimeout(
-				() => void requestVitalsEvent('first'),
-				Math.max(0, VITALS_DRAIN_MS - VITALS_FIRST_REMAINING_MS)
-			),
-			setTimeout(
-				() => void requestVitalsEvent('warn'),
-				Math.max(0, VITALS_DRAIN_MS - VITALS_WARN_REMAINING_MS)
-			),
-			setTimeout(
-				() => void requestVitalsEvent('imminent'),
-				Math.max(0, VITALS_DRAIN_MS - VITALS_IMMINENT_REMAINING_MS)
-			),
-			setTimeout(() => void requestVitalsEvent('death'), VITALS_DRAIN_MS)
-		];
+		const drain = vitalsDrainMs;
+		const timers: ReturnType<typeof setTimeout>[] = [];
+		// Midpoint heads-up — fires when half the countdown remains (proportional).
+		timers.push(setTimeout(() => void requestVitalsEvent('first'), Math.max(0, drain / 2)));
+		// Absolute end-game warnings, but only when they land AFTER the midpoint so a
+		// short countdown can't fire them out of order.
+		if (VITALS_WARN_REMAINING_MS < drain / 2)
+			timers.push(
+				setTimeout(
+					() => void requestVitalsEvent('warn'),
+					Math.max(0, drain - VITALS_WARN_REMAINING_MS)
+				)
+			);
+		if (VITALS_IMMINENT_REMAINING_MS < drain / 2)
+			timers.push(
+				setTimeout(
+					() => void requestVitalsEvent('imminent'),
+					Math.max(0, drain - VITALS_IMMINENT_REMAINING_MS)
+				)
+			);
+		timers.push(setTimeout(() => void requestVitalsEvent('death'), drain));
+		vitalsTimers = timers;
 	}
 
 	// A fictional off-world clock: a cycle of 20 arcs × 90 marks × 90 beats,
@@ -503,18 +512,18 @@
 		const p = (n: number) => String(n).padStart(2, '0');
 		return `CYC ${Math.floor(beats / 162000)} · ${p(Math.floor(beats / 8100) % 20)}:${p(Math.floor(beats / 90) % 90)}:${p(beats % 90)}`;
 	});
-	// Drains linearly from 80% to 0 over 5 minutes; ≤0 renders as "ERROR".
+	// Drains linearly from 80% to 0 over the countdown; ≤0 renders as "ERROR".
 	const vitalsPct = $derived(
-		Math.max(0, VITALS_START * (1 - (clockNow - vitalsStartedAt) / VITALS_DRAIN_MS))
+		Math.max(0, VITALS_START * (1 - (clockNow - vitalsStartedAt) / vitalsDrainMs))
 	);
 	// Live remaining air; the CRITICAL banner only shows inside the 2-minute mark.
-	const vitalsRemainingMs = $derived(Math.max(0, VITALS_DRAIN_MS - (clockNow - vitalsStartedAt)));
+	const vitalsRemainingMs = $derived(Math.max(0, vitalsDrainMs - (clockNow - vitalsStartedAt)));
 	const vitalsCritical = $derived(
 		vitalsRemainingMs > 0 && vitalsRemainingMs <= VITALS_WARN_REMAINING_MS
 	);
 	// A human label of the air remaining, for the LLM (so the player can ask).
 	function lifeSupportLabel(): string {
-		const remaining = Math.max(0, VITALS_DRAIN_MS - (Date.now() - vitalsStartedAt));
+		const remaining = Math.max(0, vitalsDrainMs - (Date.now() - vitalsStartedAt));
 		if (remaining <= 0) return 'no time — guaranteed safety has already expired';
 		const total = Math.round(remaining / 1000);
 		const m = Math.floor(total / 60);
@@ -1038,7 +1047,8 @@
 			? build.behaviours.find((b) => b.id === activeBehaviourId)
 			: undefined;
 		if (!behaviour) return;
-		const firstMins = Math.round(VITALS_FIRST_REMAINING_MS / 60000);
+		// The midpoint heads-up reports roughly how long is left at that point.
+		const firstMins = Math.max(1, Math.round(vitalsDrainMs / 2 / 60000));
 		const eventText =
 			kind === 'first'
 				? `Safety can only be guaranteed for about ${firstMins} more minutes — after that a fatal event is expected. Warn the player.`
