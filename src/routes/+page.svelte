@@ -10,6 +10,8 @@
 	let code = $state('');
 	let error = $state('');
 	let busy = $state(false);
+	// The code field — auto-focused so a keyboard-only kiosk can type immediately.
+	let inputEl = $state<HTMLInputElement>();
 	// Match the gate to the published build's UI colour. null until loaded (the
 	// form is held back so it never flashes the default amber palette first).
 	let display = $state<DisplaySettings | null>(null);
@@ -29,8 +31,19 @@
 			}
 		})();
 		computeScale();
+		// Keep keyboard focus on the code field — if the window/WM hands focus back
+		// (kiosk boot), pull it into the input so typing the code works.
+		const refocus = () => inputEl?.focus();
 		window.addEventListener('resize', computeScale);
-		return () => window.removeEventListener('resize', computeScale);
+		window.addEventListener('focus', refocus);
+		return () => {
+			window.removeEventListener('resize', computeScale);
+			window.removeEventListener('focus', refocus);
+		};
+	});
+	// Focus the field as soon as it renders (the form appears once the build loads).
+	$effect(() => {
+		inputEl?.focus();
 	});
 
 	// Render the same framed window as the game: a backdrop-coloured letterbox with
@@ -94,6 +107,7 @@
 					<p class="title">ARGOS alpha test program</p>
 					<p class="prompt">type your access code to start</p>
 					<input
+						bind:this={inputEl}
 						bind:value={code}
 						oninput={() => (code = code.toUpperCase())}
 						maxlength="24"
